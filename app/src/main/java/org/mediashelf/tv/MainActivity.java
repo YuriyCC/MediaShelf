@@ -53,6 +53,7 @@ public final class MainActivity extends Activity {
     private static final int BACK = 0xff10131a, PANEL = 0xff202738, WHITE = 0xfff0f3fa, MUTED = 0xffacb6c9, BLUE = 0xff6699ff;
     private static final String[] INDEXERS = {"xxxclub","all","mypornclub","xxxtor","0magnet","bigfangroup","freejavtorrent","pornotorrent","sosulki","sukebeinyaasi"};
     private final ExecutorService worker = Executors.newFixedThreadPool(4);
+    private final ExecutorService metadataWorker = Executors.newFixedThreadPool(3);
     private final Handler main = new Handler(Looper.getMainLooper());
     private SharedPreferences prefs;
     private LinearLayout cards;
@@ -202,7 +203,7 @@ public final class MainActivity extends Activity {
             ImageView img=new ImageView(this);img.setScaleType(ImageView.ScaleType.CENTER_CROP);
             img.setBackground(panel(0xff34425e,false));
             tile.addView(img,lp(-1,132));
-            if(!item.poster.isEmpty()) loadPoster(img,item.poster);
+            loadPoster(img,item,i<18);
             TextView name=label(item.title,13,WHITE,true);
             name.setMaxLines(3);name.setEllipsize(TextUtils.TruncateAt.END);
             name.setPadding(dp(5),dp(7),dp(5),0);
@@ -216,27 +217,100 @@ public final class MainActivity extends Activity {
             grid.addView(tile,p);
         }
     }
-    private void loadPoster(ImageView view,String link) {
-        if(!link.startsWith("http://") && !link.startsWith("https://"))return;
-        view.setTag(link);
+    private static String referer(Item item) {
+        try { Uri url=Uri.parse(item.details); return url.getScheme()+"://"+url.getAuthority()+"/"; }
+        catch(Exception e) { return "https://xxxclub.to/"; }
+    }
+    private void loadPoster(ImageView view, Item item, boolean prefetch) {
+        view.setTag(item);
+        if(!item.poster.isEmpty()) loadImage(view,item.poster,referer(item),item,true);
+        else if(prefetch) refreshMetadata(item,view);
+    }
+    private void refreshMetadata(Item item, ImageView image) {
+        if(!SiteDetails.supported(item) || item.detailsFetched) return;
+        metadataWorker.execute(() -> {
+            SiteDetails.enrich(item);
+            main.post(() -> {
+                if(isFinishing())return;
+                if(image != null && image.getTag()==item && !item.poster.isEmpty())
+                    loadImage(image,item.poster,referer(item),item,false);
+            });
+        });
+    }
+    private void loadImage(ImageView view,String link,String referer,Item item,boolean fallBackToDetails) {
+        if(!link.startsWith("http://") && !link.startsWith("https://")) {
+            if(fallBackToDetails && item!=null)refreshMetadata(item,view);
+            return;
+        }
         worker.execute(()->{
             HttpURLConnection c=null;
             try {
                 c=(HttpURLConnection)new URL(link).openConnection();
-                c.setConnectTimeout(7000);c.setReadTimeout(9000);
-                c.setRequestProperty("User-Agent","Mozilla/5.0");
-                if(c.getResponseCode()!=200)return;
+                c.setConnectTimeout(9000);c.setReadTimeout(14000);
+                c.setInstanceFollowRedirects(true);
+                c.setRequestProperty("User-Agent",SiteDetails.USER_AGENT);
+                c.setRequestProperty("Referer",referer);
+                c.setRequestProperty("Accept","image/avif,image/webp,image/apng,image/*,*/*;q=0.8");
+                int status=c.getResponseCode();
+                if(status!=200)throw new IllegalStateException("Изображение HTTP "+status);
                 BitmapFactory.Options opts=new BitmapFactory.Options();opts.inSampleSize=2;
                 Bitmap bitmap;
-                try(InputStream in=c.getInputStream()) {bitmap=BitmapFactory.decodeStream(in,null,opts);}
-                if(bitmap!=null) main.post(()->{if(link.equals(view.getTag()))view.setImageBitmap(bitmap);});
-            }catch(Exception ignored){}finally{if(c!=null)c.disconnect();}
+                try(InputStream in=c.getInputStream()) { bitmap=BitmapFactory.decodeStream(in,null,opts); }
+                if(bitmap==null)throw new IllegalStateException("Неверный формат изображения");
+                if(item!=null)item.imageError="";
+                main.post(()->{if(!isFinishing() && (item==null || view.getTag()==item))view.setImageBitmap(bitmap);});
+            }catch(Exception e) {
+                if(item!=null)item.imageError=error(e);
+                if(fallBackToDetails && item!=null)refreshMetadata(item,view);
+            }finally{if(c!=null)c.disconnect();}
         });
     }
     private void details(Item item) {
-        String info="Источник: "+item.tracker+"\nРазмер: "+item.size()+"\nСиды: "+item.seeders+"\nДата: "+item.date;
-        if(!item.description.isEmpty())info += "\n\n"+Html.fromHtml(item.description,Html.FROM_HTML_MODE_COMPACT);
-        AlertDialog.Builder b=new AlertDialog.Builder(this).setTitle(item.title).setMessage(info).setNegativeButton("Назад",null);
+        if(SiteDetails.supported(item) && !item.detailsFetched) {
+            Toast.makeText(this,"Загружаем описание и кадры...",Toast.LENGTH_SHORT).show();
+            metadataWorker.execute(()->{
+                SiteDetails.enrich(item);
+                main.post(()->{if(!isFinishing())showDetails(item);});
+            });
+        } else showDetails(item);
+    }
+    private void showDetails(Item item) {
+        LinearLayout stack=column();
+        stack.setPadding(dp(16),dp(8),dp(16),dp(15));
+        String info="Источник: "+item.tracker+"\\nРазмер: "+item.size()+"\\nСиды: "+item.seeders+"\\nДата: "+item.date;
+        TextView facts=label(info,14,WHITE,false);stack.addView(facts);
+        TextView description=label(item.description.isEmpty()?"Описание на сайте пока не получено.":item.description,14,MUTED,false);
+        description.setPadding(0,dp(16),0,dp(12));stack.addView(description);
+        if(item.screenshots.size()>0) {
+            TextView header=label("Кадры из фильма",16,WHITE,true);
+            stack.addView(header);
+            android.widget.HorizontalScrollView gallery=new android.widget.HorizontalScrollView(this);
+            LinearLayout row=line();
+            for(String pic:item.screenshots) {
+                ImageView frame=new ImageView(this);
+                frame.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                frame.setBackground(panel(PANEL,false));
+                LinearLayout.LayoutParams p=lp(142,108);
+                p.setMargins(0,dp(8),dp(9),dp(8));
+                row.addView(frame,p);
+                loadImage(frame,pic,referer(item),null,false);
+                frame.setOnClickListener(v->{
+                    ImageView full=new ImageView(this);
+                    full.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                    loadImage(full,pic,referer(item),null,false);
+                    new AlertDialog.Builder(this).setView(full).setPositiveButton("Закрыть",null).show();
+                });
+            }
+            gallery.addView(row);
+            stack.addView(gallery);
+        }
+        if(!item.imageError.isEmpty()) {
+            TextView diagnostic=label("Диагностика обложки: "+item.imageError,12,MUTED,false);
+            stack.addView(diagnostic);
+        }
+        ScrollView scroll=new ScrollView(this);scroll.addView(stack);
+        AlertDialog.Builder b=new AlertDialog.Builder(this).setTitle(item.title).setView(scroll)
+                .setNegativeButton("Назад",null);
         if(!item.link().isEmpty())b.setPositiveButton("Смотреть",(d,w)->play(item));
         if(!item.details.isEmpty())b.setNeutralButton("Страница",(d,w)->startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(item.details))));
         b.show();
@@ -299,7 +373,7 @@ public final class MainActivity extends Activity {
         if(!first)b.setNegativeButton("Отмена",null);
         b.show();
     }
-    @Override protected void onDestroy() {serial++;worker.shutdownNow();super.onDestroy();}
+    @Override protected void onDestroy() {serial++;worker.shutdownNow();metadataWorker.shutdownNow();super.onDestroy();}
     private static String read(InputStream input) throws Exception {
         ByteArrayOutputStream out=new ByteArrayOutputStream();
         byte[] b=new byte[8192];int n;
@@ -307,7 +381,10 @@ public final class MainActivity extends Activity {
         return out.toString(StandardCharsets.UTF_8.name());
     }
     static final class Item {
-        final String title,tracker,magnet,download,details,poster,description,date;
+        final String title,tracker,magnet,download,details,date;
+        volatile String poster,description,imageError="";
+        volatile boolean detailsFetched=false;
+        volatile java.util.List<String> screenshots=java.util.Collections.emptyList();
         final long bytes;final int seeders;
         Item(JSONObject j) {
             title=get(j,"Title","title");tracker=get(j,"Tracker","tracker");
