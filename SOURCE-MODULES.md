@@ -74,3 +74,10 @@
 - Changed theme to purple/indigo, immersive preview, smaller 4–6 poster grid and top-of-catalog reset.
 - Direct source and pager implementation unaffected.
 - Real site images remain real source images; scenic placeholders in design mockup are NOT shipped as fake content.
+
+## 1.4: Carousel
+- Universal presentation layer; hero content is fetched from a dedicated XXXClub native Movies category (3), isolated from home latest listing.
+- Ranked (poster + quality hint + seeder count) eligible actual torrents; excludes XXXClub pack/image/VR category groups and title patterns, deduplicates.
+- Max five slides; automatically rotates every 7.5 seconds; TV remote clickable arrows and index dots.
+- Does not run rotation in paused activity or while hero navigation has focus.
+- Never substitutes first MegaPACK or arbitrary torrent if curation fails.
