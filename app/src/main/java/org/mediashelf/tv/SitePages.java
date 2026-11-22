@@ -50,10 +50,12 @@ final class SitePages {
         else path="torrents/search/"+scope+"/"+Uri.encode(cleaned);
         return new Cursor("https://xxxclub.to/"+path);
     }
-    private static int nativeCategory(int id){
+    static int nativeCategory(int id){
         switch(id){
             case 6080:return 0; // SD
-            case 6040:return 2; // default 1080p; HD 720p also exists (id=1)
+            case 10001:return 1; // site native 720p / HD
+            case 10002:return 2; // site native 1080p / FullHD
+            case 6040:return 2; // legacy x264 Torznab category fallback
             case 6045:return 4;
             case 6090:return 3; // full movies, DVD and WEB
             case 6060:return 5;
@@ -145,87 +147,33 @@ final class SitePages {
      * Search every page-navigation anchor/button, then check same-listing
      * numeric cursor links. Never guess or manufacture a cursor.
      */
-    static String findNext(Document d,String current,Set<String> visited,int pageIndex){
-        List<String> cursorLinks=new ArrayList<>();
-        for(Element el:d.select("a[href],a[onclick],button[onclick],button[data-href],"+
-                "button[data-url],input[onclick],input[data-href],input[data-url]")) {
-            String next=extractLink(el,d.baseUri());
-            if(!sameListing(current,next) || visited.contains(next) || sameUrl(next,current))
-                continue;
-            String label=(el.text()+" "+el.attr("title")+" "+el.attr("aria-label")+
-                " "+el.attr("rel")+" "+el.className()+" "+el.attr("value"))
-                .toLowerCase(Locale.ROOT).replaceAll("\\s+"," ").trim();
-            boolean nextButton=label.contains("next page") ||
-                label.matches(".*\\bnext\\b.*") ||
-                label.contains("следующ") ||
-                label.contains("дальше") ||
-                label.contains("далее") ||
-                label.contains("›") || label.contains("»") ||
-                label.contains("→");
-            boolean previous=label.contains("prev") ||
-                label.contains("previous") || label.contains("назад") ||
-                label.contains("предыдущ");
-            if(nextButton && !previous)return next;
-            if(previous)continue;
-            if(hasOpaqueCursor(next)) {
-                if(!cursorLinks.contains(next))cursorLinks.add(next);
-            }
-        }
-        // Some templates render an unlabelled next-cursor anchor without
-        // pagination classes; it is safe only if exactly ONE new cursor exists.
-        if(cursorLinks.size()==1)return cursorLinks.get(0);
+    static String findNext(Document d,String current,Set<String> visited,int pageIndex) {
+        PageNavigation.Finding found=PageNavigation.find(d,visited,
+            url->sameListing(current,url) && !sameUrl(current,url));
+        if(found.nextUrl!=null)return found.nextUrl;
 
-        // Last resort: a site template can put the Next Page URL into a script,
-        // rather than a visible anchor. Only accept a single URL with the
-        // current search/browse prefix and a long, opaque numeric cursor.
-        if(cursorLinks.isEmpty()){
-            try {
-                String currentPath=new URI(current).getPath();
-                String base=listingPath(currentPath);
-                java.util.regex.Pattern pattern=java.util.regex.Pattern.compile(
-                    java.util.regex.Pattern.quote(base+"/")+"[0-9]{8,25}");
-                java.util.regex.Matcher matches=pattern.matcher(d.html().replace("\\/","/"));
-                List<String> found=new ArrayList<>();
-                String host=new URI(current).getHost();
-                while(matches.find()){
-                    String u="https://"+host+matches.group();
-                    if(sameListing(current,u) && !visited.contains(u) &&
-                        !sameUrl(current,u) && !found.contains(u))found.add(u);
+        // Script-only navigation is rare. Parse actual <script> contents, not
+        // the entire HTML: hidden bait links must never become a fallback.
+        try {
+            String prefix=listingPath(new URI(current).getPath());
+            String host=new URI(current).getHost();
+            java.util.regex.Pattern pattern=java.util.regex.Pattern.compile(
+                java.util.regex.Pattern.quote(prefix+"/")+"[0-9]{8,25}");
+            Set<String> options=new HashSet<>();
+            for(Element script:d.select("script")) {
+                String scriptText=script.data().replace("\\/","/");
+                java.util.regex.Matcher matcher=pattern.matcher(scriptText);
+                while(matcher.find()) {
+                    String url="https://"+host+matcher.group();
+                    if(sameListing(current,url)&&!visited.contains(url)&&
+                        !sameUrl(current,url))options.add(url);
                 }
-                if(found.size()==1)return found.get(0);
-            }catch(Exception ignored){}
-        }
+            }
+            if(options.size()==1)return options.iterator().next();
+        }catch(Exception ignored){}
         return null;
     }
 
-    private static String extractLink(Element el,String base){
-        // Plain href (including relative site URLs) is the preferred source.
-        for(String key:new String[]{"abs:href","abs:data-href","abs:data-url",
-                                     "href","data-href","data-url"}){
-            String value=el.attr(key).trim();
-            String link=resolveLink(value,base);
-            if(safeUrl(link))return link;
-        }
-        // Explicit navigation in onclick e.g. location.href='/torrents/...'.
-        String js=el.attr("onclick");
-        if(!js.isEmpty()){
-            java.util.regex.Matcher m=java.util.regex.Pattern.compile(
-                "['\\\"](https?://[^'\\\"]+/torrents/[^'\\\"]+|/torrents/[^'\\\"]+)['\\\"]")
-                .matcher(js);
-            while(m.find()){
-                String link=resolveLink(m.group(1),base);
-                if(safeUrl(link))return link;
-            }
-        }
-        return "";
-    }
-    private static String resolveLink(String raw,String base){
-        if(raw==null||raw.isEmpty() || raw.startsWith("#") ||
-            raw.startsWith("javascript:"))return "";
-        try{
-            return new URI(base).resolve(raw.replace("&amp;","&")).toString();
-        }catch(Exception ignored){return "";}
-    }
     private static boolean sameUrl(String a,String b){
         return a.equals(b) || a.replaceFirst("/+$","").equals(b.replaceFirst("/+$",""));
     }
