@@ -844,7 +844,8 @@ public final class MainActivity extends Activity {
                 // First site page can duplicate Jackett's one-page output:
                 // walk up to two real pages on this click before reporting no new items.
                 for(int attempt=0;attempt<2 && !cursor.finished;attempt++){
-                    SitePages.Page p=SitePages.next(cursor,category);
+                    NativeSource provider=NativeSources.get("xxxclub");
+                    SitePages.Page p=provider.fetchNext(cursor,category);
                     last=p.message;
                     for(Item item:p.items){
                         if(existing.add(catalogKey(item)))additional.add(item);
