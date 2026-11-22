@@ -45,3 +45,12 @@ GitHub Actions `.github/workflows/build.yml` uses Gradle 8.9, JDK17, Android API
 
 ## 0.4.1 patch
 App name in the launcher, MIUI security scan, Android TV launcher and system settings is now always **MediaShelf**. Version numbers belong only in Android package metadata (`versionName`), never the app label. `versionCode` is 5 for an in-place upgrade from signed 0.4, and the release must use the same private signing certificate.
+
+## 0.5 — selector and label fix
+- Launcher/app name is permanently `MediaShelf`, not `MediaShelf 0.1`.
+- Version is `0.5-test` (`versionCode 5`), without .4.1 style patch numbering.
+- 'Выбрать сайт' never blocks when `/api/v2.0/indexers` fails; it always offers `Все сайты`, `XXXClub`, a manual source-ID entry, and a refresh action.
+- Last successfully retrieved list of configured indexers is cached in app preferences.
+- The all-sites search also collects source IDs and names from Jackett's `Indexers` report as a secondary list discovery mechanism.
+- Status shows indexer-list errors instead of pretending all sites are working; sites remain unverified until queried.
+- Install as an in-place update over MediaShelf 0.3 or 0.4 with the **same** signing certificate.
