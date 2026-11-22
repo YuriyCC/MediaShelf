@@ -67,3 +67,18 @@ App name in the launcher, MIUI security scan, Android TV launcher and system set
 - `MediaShelf` is still the fixed launcher name, and `versionCode` increases to 6 for upgrade over signed 0.5 with preserved certificate and preferences.
 
 **Testing disclaimer:** compilation/Android signature are checked by CI and local signing tools. No direct access to the user's private Home Assistant/Jackett or TV is available, so site-specific network behaviour and image heuristics require user-side testing. A URL returning HTTP 200 does not guarantee a correct poster (it could be a thumbnail); the app now prioritizes XXXClub's detail-page poster.
+
+## 0.7: first-page limitation and site navigation (experimental)
+
+**Root cause:** Jackett's `xxxclub.yml` queries `torrents/browse/all` or `torrents/search/all/<keyword>` with a single `search.paths` entry and has no pagination rules. As a result, about 50 titles per query are returned. Filtering the first page by XXX Movies/DVD/WEB yields only a small subset (the user observed 12), which does *not* measure the full site category.
+
+MediaShelf 0.7 introduces `app/src/main/java/org/mediashelf/tv/SitePages.java`:
+- "Загрузить ещё с XXXClub" uses the site's own HTML, parses the result list, and follows actual pagination anchors. It does not invent generic offset requests or assume all indexers paginate alike.
+- Native category mapping: `6000+` Torznab categories are translated to XXXClub's site IDs, e.g. 6090→3 (Movies/DVD/WEB). URL `/torrents/browse/3` is a best-effort initial category route, **not verified live**; the app detects HTML format and errors visibly.
+- In a category, site-page discovery starts in the actual category context rather than filtering an arbitrary page of all-site releases; in search it uses the keyword URL. If site pagination is missing or blocked, the UI states that the full catalog could not be retrieved.
+- Each page is merged into the existing catalog and deduplicated by details URL. Two pages may be read on first click if the initial site page duplicates all Jackett results. No silent maximum of 50 or 120; the grid renders up to 60 at a time with on-demand "Показать ещё" to avoid creating thousands of views.
+- When clicking a release obtained directly from the website, `SiteDetails` resolves the magnet or torrent download link in the details page before enabling TorrServer playback.
+- The site pager is modular and currently active only for XXXClub. Other indexers need their own supported pagination parser and must not be labelled complete.
+- **Source of truth** for APK signing: use the same private signing key/fingerprint as 0.3–0.6; applicationId stays `org.mediashelf.tv`, versionCode 7. Never commit the key to the public GitHub repo.
+
+The direct website may block or change its HTML, so runtime validation on the user's device is still required. This change deliberately keeps Jackett as the initial search fallback until direct pagination proves reliable.
