@@ -42,3 +42,6 @@ GitHub Actions `.github/workflows/build.yml` uses Gradle 8.9, JDK17, Android API
 - Some configured Jackett indexers can be unreachable; diagnostics explicitly distinguishes successful responses, no results and errors.
 - Generic category buttons such as Gangbang are query presets, not standardized categories across trackers.
 - This is an experimental standalone APK; do not expose Jackett/TorrServer to the public Internet.
+
+## 0.4.1 patch
+App name in the launcher, MIUI security scan, Android TV launcher and system settings is now always **MediaShelf**. Version numbers belong only in Android package metadata (`versionName`), never the app label. `versionCode` is 5 for an in-place upgrade from signed 0.4, and the release must use the same private signing certificate.

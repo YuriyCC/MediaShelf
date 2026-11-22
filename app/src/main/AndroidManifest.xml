@@ -3,7 +3,7 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
     <uses-feature android:name="android.software.leanback" android:required="false"/>
-    <application android:label="MediaShelf 0.1" android:icon="@android:drawable/ic_media_play"
+    <application android:label="MediaShelf" android:icon="@android:drawable/ic_media_play"
         android:usesCleartextTraffic="true" android:theme="@android:style/Theme.Material.NoActionBar">
         <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="unspecified">
             <intent-filter>
