@@ -56,6 +56,17 @@ final class SiteDetails {
                 String base=u.getScheme()+"://"+u.getAuthority()+"/";
                 Document d=Jsoup.connect(item.details).userAgent(USER_AGENT).referrer(base)
                     .timeout(12000).maxBodySize(3_500_000).followRedirects(true).get();
+                if(site.equals("xxxclub")) {
+                    Element magnet=d.selectFirst("a[href^=magnet:?xt=],a[href^=magnet:?]");
+                    if(magnet!=null) {
+                        String value=magnet.attr("href");
+                        if(value.startsWith("magnet:?"))item.magnet=value;
+                    }
+                    if(item.magnet.isEmpty()){
+                        Element torrent=d.selectFirst("a[href^=/torrents/download/]");
+                        if(torrent!=null)item.download=torrent.attr("abs:href");
+                    }
+                }
                 Element portrait=null;
                 Element description=null;
                 if(site.equals("xxxclub")) {
