@@ -50,7 +50,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
-    private static final int BACK = 0xff0e121c, PANEL = 0xff202b40, WHITE = 0xfff0f3fa, MUTED = 0xffa6b4cc, BLUE = 0xff81aaff;
+    private static final int BACK = MediaDesign.BG, PANEL = MediaDesign.SURFACE,
+        WHITE = MediaDesign.TEXT, MUTED = MediaDesign.MUTED, BLUE = MediaDesign.ACCENT;
     // Source IDs are loaded from Jackett dynamically; "all" is the virtual combined source.
     private final List<SourceRegistry.Source> sources = new ArrayList<>();
     private final java.util.Map<String,String> probeResults = new java.util.concurrent.ConcurrentHashMap<>();
@@ -83,7 +84,7 @@ public final class MainActivity extends Activity {
     private int dp(float value) { return (int)(getResources().getDisplayMetrics().density * value + 0.5f); }
     private GradientDrawable panel(int bg, boolean focus) {
         GradientDrawable d = new GradientDrawable();
-        d.setColor(bg); d.setCornerRadius(dp(16));
+        d.setColor(bg); d.setCornerRadius(dp(14));
         if (focus) d.setStroke(dp(2), BLUE);
         return d;
     }
@@ -108,9 +109,14 @@ public final class MainActivity extends Activity {
     private Button button(String title) {
         Button b = new Button(this);
         b.setText(title); b.setAllCaps(false); b.setTextColor(WHITE);
-        b.setBackground(panel(PANEL,false));
+        b.setBackground(MediaDesign.round(this,PANEL,13));
         b.setFocusable(true);
-        b.setOnFocusChangeListener((v,f) -> v.setBackground(panel(f ? 0xff34415c : PANEL,f)));
+        b.setMinHeight(0);b.setMinimumHeight(0);
+        b.setOnFocusChangeListener((v,f) -> {
+            b.setBackground(f?MediaDesign.outlined(this,0xff314768,
+                MediaDesign.ACCENT,13,2):MediaDesign.round(this,PANEL,13));
+            MediaDesign.animateFocus(b,f);
+        });
         return b;
     }
     private LinearLayout.LayoutParams lp(int w,int h) {
@@ -121,88 +127,168 @@ public final class MainActivity extends Activity {
         prefs = getSharedPreferences("local_settings",MODE_PRIVATE);
         activeSource=prefs.getString("indexer","xxxclub");
         sources.addAll(SourceRegistry.fromCache(prefs.getString("source_cache","[]")));
+        if(activeSource.isEmpty())activeSource="xxxclub";
         ui();
         if (!prefs.getString("api_key","").isEmpty())loadSources();
         load("","latest");
     }
+    private final List<Button> filterButtons=new ArrayList<>();
+    private final List<Integer> filterCodes=new ArrayList<>();
+    private final android.util.LruCache<String,Bitmap> pictureCache =
+        new android.util.LruCache<String,Bitmap>(24*1024*1024){
+            @Override protected int sizeOf(String key,Bitmap bitmap){return bitmap.getByteCount();}
+        };
+    private int focusItemAfterLoad=-1;
+
+    private TextView eyebrow(String value){
+        TextView t=label(value,11,MediaDesign.ACCENT_LIGHT,true);
+        t.setLetterSpacing(0.14f);
+        return t;
+    }
+    private Button accentButton(String name){
+        Button b=button(name);
+        b.setBackground(MediaDesign.gradient(this,
+            new int[]{0xff7298ed,0xff5675c8},14));
+        b.setTextColor(Color.WHITE);
+        b.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+        b.setOnFocusChangeListener((v,focused)->{
+            b.setBackground(focused?
+                MediaDesign.outlined(this,0xff789ef7,Color.WHITE,14,2):
+                MediaDesign.gradient(this,new int[]{0xff7298ed,0xff5675c8},14));
+            MediaDesign.animateFocus(b,focused);
+        });
+        return b;
+    }
+    private LinearLayout.LayoutParams spaced(int w,int h,int right,int bottom){
+        LinearLayout.LayoutParams p=lp(w,h);
+        p.rightMargin=dp(right);p.bottomMargin=dp(bottom);
+        return p;
+    }
+
     private void ui() {
         int screenWidthDp=getResources().getConfiguration().screenWidthDp;
-        int mode=getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_TYPE_MASK;
-        tvLayout=(mode==android.content.res.Configuration.UI_MODE_TYPE_TELEVISION) || screenWidthDp>=680;
+        int mode=getResources().getConfiguration().uiMode &
+            android.content.res.Configuration.UI_MODE_TYPE_MASK;
+        tvLayout=(mode==android.content.res.Configuration.UI_MODE_TYPE_TELEVISION)||
+            screenWidthDp>=680;
+        getWindow().setStatusBarColor(MediaDesign.BG);
+        getWindow().setNavigationBarColor(MediaDesign.BG);
+        if(mode==android.content.res.Configuration.UI_MODE_TYPE_TELEVISION)
+            getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_FULLSCREEN|View.SYSTEM_UI_FLAG_HIDE_NAVIGATION|
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+
         LinearLayout outer=line();
-        outer.setBackgroundColor(BACK);
         outer.setGravity(Gravity.TOP);
+        outer.setBackgroundColor(MediaDesign.BG);
         setContentView(outer);
-        if(tvLayout) {
+        if(tvLayout){
             LinearLayout sidebar=column();
-            sidebar.setBackgroundColor(0xff151a25);
-            sidebar.setPadding(dp(12),dp(22),dp(12),dp(10));
-            TextView brand=label("MediaShelf",24,WHITE,true);
-            brand.setPadding(dp(6),0,0,dp(17));
-            sidebar.addView(brand);
-            Button all=button("Все сайты");
-            all.setOnClickListener(v->selectSource("all"));
-            sidebar.addView(all,lp(-1,46));
-            sourceSummary=label("Загрузка источников...",12,MUTED,false);
-            sourceSummary.setPadding(dp(7),dp(17),0,dp(8));
+            sidebar.setPadding(dp(16),dp(23),dp(16),dp(18));
+            sidebar.setBackground(MediaDesign.horizontal(this,
+                new int[]{0xff141e31,0xff111725},0));
+            LinearLayout brandRow=line();
+            TextView brandLogo=label("▶",27,Color.WHITE,true);
+            brandLogo.setGravity(Gravity.CENTER);
+            brandLogo.setBackground(MediaDesign.gradient(this,
+                new int[]{0xff7497e8,0xff425fbc},15));
+            brandRow.addView(brandLogo,spaced(48,48,12,0));
+            LinearLayout brandText=column();
+            brandText.addView(label("MediaShelf",23,MediaDesign.TEXT,true));
+            TextView sub=label("ТВОЯ МЕДИАТЕКА",10,MediaDesign.MUTED,true);
+            sub.setLetterSpacing(0.13f);
+            brandText.addView(sub);
+            brandRow.addView(brandText);
+            sidebar.addView(brandRow,spaced(-1,58,0,34));
+            TextView section=eyebrow("НАВИГАЦИЯ");
+            section.setPadding(dp(11),0,0,dp(11));
+            sidebar.addView(section);
+            Button home=button("▦   Весь каталог");
+            home.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
+            home.setPadding(dp(16),0,dp(14),0);
+            home.setOnClickListener(v->selectSource("all"));
+            sidebar.addView(home,spaced(-1,52,0,18));
+            sourceSummary=eyebrow("ИСТОЧНИКИ");
+            sourceSummary.setPadding(dp(11),0,0,dp(11));
             sidebar.addView(sourceSummary);
             ScrollView sourceScroll=new ScrollView(this);
             sourceScroll.setVerticalScrollBarEnabled(false);
+            sourceScroll.setFillViewport(false);
             sourceButtons=column();
             sourceScroll.addView(sourceButtons);
             sidebar.addView(sourceScroll,new LinearLayout.LayoutParams(-1,0,1));
-            Button check=button("Диагностика");
+            View divider=new View(this);
+            divider.setBackgroundColor(0xff2c3852);
+            sidebar.addView(divider,spaced(-1,1,0,14));
+            Button check=button("◈  Проверка сайтов");
+            check.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
+            check.setPadding(dp(14),0,0,0);
             check.setOnClickListener(v->diagnostics());
-            sidebar.addView(check,lp(-1,44));
-            Button settings=button("Настройки");
+            sidebar.addView(check,spaced(-1,47,0,7));
+            Button settings=button("⚙  Настройки");
+            settings.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
+            settings.setPadding(dp(14),0,0,0);
             settings.setOnClickListener(v->settings(false));
-            sidebar.addView(settings,lp(-1,44));
-            outer.addView(sidebar,lp(218,-1));
+            sidebar.addView(settings,lp(-1,47));
+            TextView foot=label("OK — открыть     ◀ — назад",10,0xff7585a4,false);
+            foot.setPadding(dp(10),dp(19),0,0);
+            sidebar.addView(foot);
+            outer.addView(sidebar,lp(240,-1));
         }
         LinearLayout app=column();
-        app.setPadding(dp(tvLayout?24:14),dp(tvLayout?20:10),dp(tvLayout?24:14),0);
+        app.setPadding(dp(tvLayout?30:16),dp(tvLayout?23:14),dp(tvLayout?27:16),0);
         outer.addView(app,new LinearLayout.LayoutParams(0,-1,1));
+
         LinearLayout header=line();
-        if(!tvLayout) {
-            TextView title=label("MediaShelf",24,WHITE,true);
-            header.addView(title,new LinearLayout.LayoutParams(0,dp(48),1));
-        } else {
-            TextView title=label("Медиатека 18+",26,WHITE,true);
-            header.addView(title,new LinearLayout.LayoutParams(0,dp(54),1));
-        }
-        sourceSelector=button("Источник: "+activeSource);
+        LinearLayout headerTitles=column();
+        TextView trail=eyebrow(tvLayout?"ВЗРОСЛЫЙ КАТАЛОГ  /  MEDIASHELF":"MEDIASHELF  /  18+");
+        headerTitles.addView(trail);
+        TextView title=label(tvLayout?"Медиатека":"MediaShelf",tvLayout?30:24,
+            MediaDesign.TEXT,true);
+        title.setPadding(0,dp(1),0,0);
+        headerTitles.addView(title);
+        header.addView(headerTitles,new LinearLayout.LayoutParams(0,dp(tvLayout?70:65),1));
+        sourceSelector=button("XXXClub  ▾");
+        sourceSelector.setTextSize(tvLayout?15:13);
         sourceSelector.setOnClickListener(v->chooseSource());
-        header.addView(sourceSelector,lp(tvLayout?220:172,48));
-        if(!tvLayout) {
+        header.addView(sourceSelector,lp(tvLayout?176:116,47));
+        if(!tvLayout){
             Button options=button("⋮");
             options.setOnClickListener(v->moreOptions());
-            LinearLayout.LayoutParams op=lp(48,48);op.leftMargin=dp(7);
+            LinearLayout.LayoutParams op=lp(47,47);op.leftMargin=dp(7);
             header.addView(options,op);
         }
         app.addView(header);
-        status=label("Каталог · выбирай источник",14,MUTED,false);
-        app.addView(status,lp(-1,42));
+
+        status=label("Выбери категорию или найди раздачу",13,MediaDesign.MUTED,false);
+        status.setSingleLine(true);status.setEllipsize(TextUtils.TruncateAt.END);
+        app.addView(status,spaced(-1,tvLayout?28:25,0,12));
+
         LinearLayout searchRow=line();
         queryInput=new EditText(this);
-        queryInput.setTextColor(WHITE);
-        queryInput.setHintTextColor(MUTED);
+        queryInput.setTextColor(MediaDesign.TEXT);
+        queryInput.setHintTextColor(0xff8d9dbb);
         queryInput.setSingleLine(true);
-        queryInput.setHint("Название, студия или тема…");
-        queryInput.setTextSize(tvLayout?19:16);
-        queryInput.setBackground(panel(PANEL,false));
-        queryInput.setPadding(dp(12),0,dp(12),0);
+        queryInput.setHint("Название фильма, студии или темы");
+        queryInput.setTextSize(tvLayout?18:15);
+        queryInput.setBackground(MediaDesign.outlined(this,
+            0xff1a263b,0xff324463,14,1));
+        queryInput.setPadding(dp(17),0,dp(12),0);
         queryInput.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
+        queryInput.setOnFocusChangeListener((v,f)->queryInput.setBackground(
+            MediaDesign.outlined(this,f?0xff243756:0xff1a263b,
+                f?MediaDesign.ACCENT:0xff324463,14,f?2:1)));
         queryInput.setOnEditorActionListener((v,action,event)->{
-            if(action==EditorInfo.IME_ACTION_SEARCH) {
+            if(action==EditorInfo.IME_ACTION_SEARCH){
                 currentCategory=0;currentCategoryLabel="";
                 load(queryInput.getText().toString().trim(),"search");
                 return true;
             }
             return false;
         });
-        searchRow.addView(queryInput,new LinearLayout.LayoutParams(0,dp(50),1));
-        Button go=button("Найти");
-        LinearLayout.LayoutParams gp=lp(tvLayout?112:85,50);
+        searchRow.addView(queryInput,new LinearLayout.LayoutParams(0,dp(tvLayout?57:52),1));
+        Button go=accentButton("⌕  Найти");
+        LinearLayout.LayoutParams gp=lp(tvLayout?124:94,tvLayout?57:52);
         gp.leftMargin=dp(10);
         searchRow.addView(go,gp);
         go.setOnClickListener(v->{
@@ -210,34 +296,79 @@ public final class MainActivity extends Activity {
             load(queryInput.getText().toString().trim(),"search");
         });
         app.addView(searchRow);
+
         LinearLayout tabs=line();
-        String[] titles={"Новинки","Популярное","Разделы сайта","Gangbang","Double","Fisting"};
-        for(String text:titles) {
-            Button button=button(text);
-            LinearLayout.LayoutParams p=lp(-2,44);
-            p.setMargins(0,dp(10),dp(8),dp(10));
-            tabs.addView(button,p);
-            button.setOnClickListener(v->{
-                if(text.equals("Разделы сайта")) {categories();return;}
-                currentCategory=0;currentCategoryLabel="";
-                String q=text.equals("Новинки")||text.equals("Популярное")?"":text;
-                String sort=text.equals("Новинки")?"latest":text.equals("Популярное")?"popular":"search";
-                queryInput.setText(q);
-                load(q,sort);
+        String[] titles={"Новинки","Популярное","Все разделы",
+            "Фильмы","720p","1080p","4K","Сборники","Фото","VR"};
+        int[] codes={-1,-2,-3,6090,10001,10002,6045,6050,6060,6070};
+        for(int i=0;i<titles.length;i++){
+            final int code=codes[i];
+            final String name=titles[i];
+            Button chip=button(name);
+            chip.setTextSize(tvLayout?13:12);
+            chip.setMinHeight(0);chip.setMinimumHeight(0);
+            chip.setPadding(dp(15),0,dp(15),0);
+            chip.setOnClickListener(v->{
+                if(code==-3){categories();return;}
+                if(code==-1 || code==-2){
+                    currentCategory=0;currentCategoryLabel="";
+                    queryInput.setText("");
+                    load("",code==-1?"latest":"popular");
+                }else{
+                    currentCategory=code;currentCategoryLabel=name;
+                    queryInput.setText("");
+                    load("","latest");
+                }
             });
+            tabs.addView(chip,spaced(-2,tvLayout?42:39,8,0));
+            filterButtons.add(chip);filterCodes.add(code);
         }
         android.widget.HorizontalScrollView strip=new android.widget.HorizontalScrollView(this);
         strip.setHorizontalScrollBarEnabled(false);
+        strip.setFillViewport(false);
         strip.addView(tabs);
-        app.addView(strip);
+        LinearLayout.LayoutParams strips=lp(-1,tvLayout?69:60);
+        strips.topMargin=dp(6);
+        app.addView(strip,strips);
+
         ScrollView results=new ScrollView(this);
         catalogScroll=results;
         results.setFillViewport(true);
+        results.setVerticalScrollBarEnabled(false);
+        results.setDescendantFocusability(android.view.ViewGroup.FOCUS_AFTER_DESCENDANTS);
         cards=column();
-        cards.setPadding(0,dp(12),0,dp(28));
+        cards.setPadding(0,dp(5),0,dp(35));
         results.addView(cards);
         app.addView(results,new LinearLayout.LayoutParams(-1,0,1));
         refreshSourceMenu();
+        updateFilters();
+    }
+
+    private void updateFilters(){
+        boolean nativeSource=activeSource.equals("xxxclub")||activeSource.equals("all");
+        for(int i=0;i<filterButtons.size();i++){
+            Button chip=filterButtons.get(i);
+            int code=filterCodes.get(i);
+            chip.setVisibility(code>0 && !nativeSource?View.GONE:View.VISIBLE);
+            boolean active=code==-1 && currentCategory==0 && lastSort.equals("latest")&&
+                    lastQuery.isEmpty() ||
+                code==-2 && currentCategory==0 && lastSort.equals("popular")&&
+                    lastQuery.isEmpty() ||
+                code>0 && code==currentCategory && lastQuery.isEmpty();
+            chip.setSelected(active);
+            chip.setTextColor(active?MediaDesign.TEXT:MediaDesign.MUTED);
+            chip.setBackground(active?
+                MediaDesign.outlined(this,0xff314b79,0xff668fe2,12,1):
+                MediaDesign.round(this,0xff1a2436,12));
+            chip.setOnFocusChangeListener((v,f)->{
+                chip.setBackground(f?MediaDesign.outlined(this,0xff38547c,
+                    MediaDesign.ACCENT,12,2):
+                    chip.isSelected()?MediaDesign.outlined(this,0xff314b79,
+                        0xff668fe2,12,1):
+                        MediaDesign.round(this,0xff1a2436,12));
+                MediaDesign.animateFocus(chip,f);
+            });
+        }
     }
     private void moreOptions() {
         String[] choices={"Выбор сайта","Категории сайта","Диагностика источников","Настройки"};
@@ -256,24 +387,43 @@ public final class MainActivity extends Activity {
         if(sourceSelector!=null)sourceSelector.setText(title+"  ▾");
         if(sourceButtons==null)return;
         sourceButtons.removeAllViews();
-        if(sourceSummary!=null)
-            sourceSummary.setText("Источники · "+SiteCatalog.all().size()+"\nПрямое подключение: 1");
-        for(SiteCatalog.Site site:SiteCatalog.all()) {
-            String text=site.title+(site.direct?"  ●":"  ·");
-            Button b=button(text);
-            b.setTextSize(12);
-            if(activeSource.equals(site.id))b.setTextColor(0xffa8c6ff);
+        if(sourceSummary!=null)sourceSummary.setText("ИСТОЧНИКИ");
+        for(SiteCatalog.Site site:SiteCatalog.all()){
+            boolean selected=activeSource.equals(site.id);
+            Button b=button((site.direct?"●  ":"○  ")+site.title);
+            b.setTextSize(14);
+            b.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
+            b.setPadding(dp(15),0,0,0);
+            b.setTextColor(selected?MediaDesign.TEXT:
+                site.direct?0xffd6e0f2:0xff8292ae);
+            b.setBackground(selected?
+                MediaDesign.outlined(this,0xff2b4269,0xff567bc4,13,1):
+                MediaDesign.round(this,MediaDesign.SIDEBAR,13));
+            b.setOnFocusChangeListener((v,f)->{
+                b.setBackground(f?
+                    MediaDesign.outlined(this,0xff38527b,MediaDesign.ACCENT,13,2):
+                    selected?
+                        MediaDesign.outlined(this,0xff2b4269,0xff567bc4,13,1):
+                        MediaDesign.round(this,MediaDesign.SIDEBAR,13));
+                MediaDesign.animateFocus(b,f);
+            });
             b.setContentDescription(site.title+", "+site.mode());
             b.setOnClickListener(v->selectSource(site.id));
-            sourceButtons.addView(b,lp(-1,45));
+            sourceButtons.addView(b,spaced(-1,49,0,5));
         }
-        Button all=button("Все подключённые");
-        all.setTextSize(12);
+        Button all=button("▦  Все подключённые");
+        all.setTextSize(13);
+        all.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
+        all.setPadding(dp(15),0,0,0);
         all.setOnClickListener(v->selectSource("all"));
-        sourceButtons.addView(all,lp(-1,47));
-        Button add=button("+ Добавить источник");
+        sourceButtons.addView(all,spaced(-1,48,0,5));
+        Button add=button("+  Управление сайтами");
+        add.setTextSize(13);
+        add.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
+        add.setPadding(dp(15),0,0,0);
         add.setOnClickListener(v->chooseSource());
-        sourceButtons.addView(add,lp(-1,46));
+        sourceButtons.addView(add,lp(-1,48));
+        updateFilters();
     }
     private void loadSources() {
         if(loadingSources)return;
