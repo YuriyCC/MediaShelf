@@ -2,6 +2,7 @@ package org.mediashelf.tv;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.pm.ActivityInfo;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -59,6 +60,9 @@ public final class MainActivity extends Activity {
     private TextView sourceSummary;
     private Button sourceSelector;
     private boolean tvLayout;
+    private boolean tvPreviewMode;
+    private boolean compactTvPreview;
+    private boolean hardwareTv;
     private int currentCategory = 0;
     private String currentCategoryLabel = "";
     private String activeSource = "xxxclub";
@@ -124,13 +128,41 @@ public final class MainActivity extends Activity {
     }
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
-        prefs = getSharedPreferences("local_settings",MODE_PRIVATE);
+        prefs=getSharedPreferences("local_settings",MODE_PRIVATE);
+        int mode=getResources().getConfiguration().uiMode &
+            android.content.res.Configuration.UI_MODE_TYPE_MASK;
+        hardwareTv=mode==android.content.res.Configuration.UI_MODE_TYPE_TELEVISION;
+        if(!hardwareTv && prefs.getBoolean("tv_preview",false))
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
         activeSource=prefs.getString("indexer","xxxclub");
         sources.addAll(SourceRegistry.fromCache(prefs.getString("source_cache","[]")));
         if(activeSource.isEmpty())activeSource="xxxclub";
+        if(saved!=null){
+            lastQuery=saved.getString("last_query","");
+            lastSort=saved.getString("last_sort","latest");
+            currentCategory=saved.getInt("current_category",0);
+            currentCategoryLabel=saved.getString("category_label","");
+        }
         ui();
-        if (!prefs.getString("api_key","").isEmpty())loadSources();
-        load("","latest");
+        if(queryInput!=null && !lastQuery.isEmpty())queryInput.setText(lastQuery);
+        if(!prefs.getString("api_key","").isEmpty())loadSources();
+        load(lastQuery,lastSort);
+    }
+    @Override protected void onSaveInstanceState(Bundle out){
+        out.putString("last_query",lastQuery);
+        out.putString("last_sort",lastSort);
+        out.putInt("current_category",currentCategory);
+        out.putString("category_label",currentCategoryLabel);
+        super.onSaveInstanceState(out);
+    }
+    private void toggleTvPreview(){
+        if(hardwareTv)return;
+        boolean enabled=!prefs.getBoolean("tv_preview",false);
+        prefs.edit().putBoolean("tv_preview",enabled).apply();
+        setRequestedOrientation(enabled?
+            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE:
+            ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+        recreate();
     }
     private final List<Button> filterButtons=new ArrayList<>();
     private final List<Integer> filterCodes=new ArrayList<>();
@@ -170,11 +202,16 @@ public final class MainActivity extends Activity {
         int mode=getResources().getConfiguration().uiMode &
             android.content.res.Configuration.UI_MODE_TYPE_MASK;
         int screenHeightDp=getResources().getConfiguration().screenHeightDp;
-        tvLayout=(mode==android.content.res.Configuration.UI_MODE_TYPE_TELEVISION)||
+        hardwareTv=mode==android.content.res.Configuration.UI_MODE_TYPE_TELEVISION;
+        tvPreviewMode=!hardwareTv && prefs.getBoolean("tv_preview",false);
+        compactTvPreview=tvPreviewMode &&
+            (screenWidthDp<960 || screenHeightDp<650);
+        tvLayout=hardwareTv || tvPreviewMode ||
             (screenWidthDp>=840 && screenHeightDp>=550);
+        filterButtons.clear();filterCodes.clear();
         getWindow().setStatusBarColor(MediaDesign.BG);
         getWindow().setNavigationBarColor(MediaDesign.BG);
-        if(mode==android.content.res.Configuration.UI_MODE_TYPE_TELEVISION)
+        if(hardwareTv)
             getWindow().getDecorView().setSystemUiVisibility(
                 View.SYSTEM_UI_FLAG_FULLSCREEN|View.SYSTEM_UI_FLAG_HIDE_NAVIGATION|
                 View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
@@ -185,32 +222,44 @@ public final class MainActivity extends Activity {
         setContentView(outer);
         if(tvLayout){
             LinearLayout sidebar=column();
-            sidebar.setPadding(dp(16),dp(23),dp(16),dp(18));
+            sidebar.setPadding(dp(compactTvPreview?8:16),
+                dp(compactTvPreview?9:23),dp(compactTvPreview?8:16),
+                dp(compactTvPreview?8:18));
             sidebar.setBackground(MediaDesign.horizontal(this,
                 new int[]{0xff141e31,0xff111725},0));
             LinearLayout brandRow=line();
-            TextView brandLogo=label("▶",27,Color.WHITE,true);
+            TextView brandLogo=label("▶",compactTvPreview?19:27,Color.WHITE,true);
             brandLogo.setGravity(Gravity.CENTER);
             brandLogo.setBackground(MediaDesign.gradient(this,
                 new int[]{0xff7497e8,0xff425fbc},15));
-            brandRow.addView(brandLogo,spaced(48,48,12,0));
+            brandRow.addView(brandLogo,spaced(
+                compactTvPreview?34:48,compactTvPreview?34:48,
+                compactTvPreview?7:12,0));
             LinearLayout brandText=column();
-            brandText.addView(label("MediaShelf",23,MediaDesign.TEXT,true));
-            TextView sub=label("ТВОЯ МЕДИАТЕКА",10,MediaDesign.MUTED,true);
-            sub.setLetterSpacing(0.13f);
-            brandText.addView(sub);
+            brandText.addView(label("MediaShelf",
+                compactTvPreview?16:23,MediaDesign.TEXT,true));
+            if(!compactTvPreview){
+                TextView sub=label("ТВОЯ МЕДИАТЕКА",10,MediaDesign.MUTED,true);
+                sub.setLetterSpacing(0.13f);
+                brandText.addView(sub);
+            }
             brandRow.addView(brandText);
-            sidebar.addView(brandRow,spaced(-1,58,0,34));
+            sidebar.addView(brandRow,spaced(-1,
+                compactTvPreview?42:58,0,compactTvPreview?7:34));
             TextView section=eyebrow("НАВИГАЦИЯ");
-            section.setPadding(dp(11),0,0,dp(11));
+            section.setPadding(dp(compactTvPreview?5:11),0,0,
+                dp(compactTvPreview?4:11));
             sidebar.addView(section);
             Button home=button("▦   Весь каталог");
             home.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
-            home.setPadding(dp(16),0,dp(14),0);
+            home.setPadding(dp(compactTvPreview?8:16),0,dp(4),0);
             home.setOnClickListener(v->selectSource("all"));
-            sidebar.addView(home,spaced(-1,52,0,18));
+            home.setTextSize(compactTvPreview?11:14);
+            sidebar.addView(home,spaced(-1,
+                compactTvPreview?38:52,0,compactTvPreview?5:18));
             sourceSummary=eyebrow("ИСТОЧНИКИ");
-            sourceSummary.setPadding(dp(11),0,0,dp(11));
+            sourceSummary.setPadding(dp(compactTvPreview?5:11),0,0,
+                dp(compactTvPreview?4:11));
             sidebar.addView(sourceSummary);
             ScrollView sourceScroll=new ScrollView(this);
             sourceScroll.setVerticalScrollBarEnabled(false);
@@ -220,39 +269,59 @@ public final class MainActivity extends Activity {
             sidebar.addView(sourceScroll,new LinearLayout.LayoutParams(-1,0,1));
             View divider=new View(this);
             divider.setBackgroundColor(0xff2c3852);
-            sidebar.addView(divider,spaced(-1,1,0,14));
+            sidebar.addView(divider,spaced(-1,1,0,compactTvPreview?5:14));
+            if(tvPreviewMode){
+                Button exit=accentButton("⇄  Режим телефона");
+                exit.setTextSize(compactTvPreview?11:13);
+                exit.setOnClickListener(v->toggleTvPreview());
+                sidebar.addView(exit,spaced(-1,
+                    compactTvPreview?38:47,0,compactTvPreview?5:9));
+            }
             Button check=button("◈  Проверка сайтов");
             check.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
-            check.setPadding(dp(14),0,0,0);
+            check.setPadding(dp(compactTvPreview?6:14),0,0,0);
+            check.setTextSize(compactTvPreview?11:14);
             check.setOnClickListener(v->diagnostics());
-            sidebar.addView(check,spaced(-1,47,0,7));
+            sidebar.addView(check,spaced(-1,
+                compactTvPreview?39:47,0,compactTvPreview?3:7));
             Button settings=button("⚙  Настройки");
             settings.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
-            settings.setPadding(dp(14),0,0,0);
+            settings.setPadding(dp(compactTvPreview?6:14),0,0,0);
+            settings.setTextSize(compactTvPreview?11:14);
             settings.setOnClickListener(v->settings(false));
-            sidebar.addView(settings,lp(-1,47));
-            TextView foot=label("OK — открыть     ◀ — назад",10,0xff7585a4,false);
-            foot.setPadding(dp(10),dp(19),0,0);
-            sidebar.addView(foot);
-            outer.addView(sidebar,lp(240,-1));
+            sidebar.addView(settings,lp(-1,compactTvPreview?39:47));
+            if(!compactTvPreview){
+                TextView foot=label("OK — открыть     ◀ — назад",10,0xff7585a4,false);
+                foot.setPadding(dp(10),dp(19),0,0);
+                sidebar.addView(foot);
+            }
+            outer.addView(sidebar,lp(compactTvPreview?
+                Math.max(144,Math.min(185,screenWidthDp/4)):240,-1));
         }
         LinearLayout app=column();
-        app.setPadding(dp(tvLayout?30:16),dp(tvLayout?23:14),dp(tvLayout?27:16),0);
+        app.setPadding(dp(compactTvPreview?12:tvLayout?30:16),
+            dp(compactTvPreview?8:tvLayout?23:14),
+            dp(compactTvPreview?11:tvLayout?27:16),0);
         outer.addView(app,new LinearLayout.LayoutParams(0,-1,1));
 
         LinearLayout header=line();
         LinearLayout headerTitles=column();
-        TextView trail=eyebrow(tvLayout?"ВЗРОСЛЫЙ КАТАЛОГ  /  MEDIASHELF":"MEDIASHELF  /  18+");
+        TextView trail=eyebrow(tvPreviewMode?
+            "ПРЕДПРОСМОТР НА ТЕЛЕФОНЕ  /  TV":
+            tvLayout?"ВЗРОСЛЫЙ КАТАЛОГ  /  MEDIASHELF":"MEDIASHELF  /  18+");
         headerTitles.addView(trail);
-        TextView title=label(tvLayout?"Медиатека":"MediaShelf",tvLayout?30:24,
+        TextView title=label(tvLayout?"Медиатека":"MediaShelf",
+            compactTvPreview?21:tvLayout?30:24,
             MediaDesign.TEXT,true);
         title.setPadding(0,dp(1),0,0);
         headerTitles.addView(title);
-        header.addView(headerTitles,new LinearLayout.LayoutParams(0,dp(tvLayout?70:65),1));
+        header.addView(headerTitles,new LinearLayout.LayoutParams(0,
+            dp(compactTvPreview?48:tvLayout?70:65),1));
         sourceSelector=button("XXXClub  ▾");
-        sourceSelector.setTextSize(tvLayout?15:13);
+        sourceSelector.setTextSize(compactTvPreview?11:tvLayout?15:13);
         sourceSelector.setOnClickListener(v->chooseSource());
-        header.addView(sourceSelector,lp(tvLayout?176:116,47));
+        header.addView(sourceSelector,lp(compactTvPreview?115:tvLayout?176:116,
+            compactTvPreview?38:47));
         if(!tvLayout){
             Button options=button("⋮");
             options.setOnClickListener(v->moreOptions());
@@ -263,15 +332,17 @@ public final class MainActivity extends Activity {
 
         status=label("Выбери категорию или найди раздачу",13,MediaDesign.MUTED,false);
         status.setSingleLine(true);status.setEllipsize(TextUtils.TruncateAt.END);
-        app.addView(status,spaced(-1,tvLayout?28:25,0,12));
+        app.addView(status,spaced(-1,
+            compactTvPreview?20:tvLayout?28:25,0,compactTvPreview?3:12));
 
         LinearLayout searchRow=line();
         queryInput=new EditText(this);
         queryInput.setTextColor(MediaDesign.TEXT);
         queryInput.setHintTextColor(0xff8d9dbb);
         queryInput.setSingleLine(true);
-        queryInput.setHint("Название фильма, студии или темы");
-        queryInput.setTextSize(tvLayout?18:15);
+        queryInput.setHint(compactTvPreview?"Поиск по сайту":
+            "Название фильма, студии или темы");
+        queryInput.setTextSize(compactTvPreview?13:tvLayout?18:15);
         queryInput.setBackground(MediaDesign.outlined(this,
             0xff1a263b,0xff324463,14,1));
         queryInput.setPadding(dp(17),0,dp(12),0);
@@ -287,9 +358,12 @@ public final class MainActivity extends Activity {
             }
             return false;
         });
-        searchRow.addView(queryInput,new LinearLayout.LayoutParams(0,dp(tvLayout?57:52),1));
+        searchRow.addView(queryInput,new LinearLayout.LayoutParams(0,
+            dp(compactTvPreview?43:tvLayout?57:52),1));
         Button go=accentButton("⌕  Найти");
-        LinearLayout.LayoutParams gp=lp(tvLayout?124:94,tvLayout?57:52);
+        LinearLayout.LayoutParams gp=lp(
+            compactTvPreview?84:tvLayout?124:94,
+            compactTvPreview?43:tvLayout?57:52);
         gp.leftMargin=dp(10);
         searchRow.addView(go,gp);
         go.setOnClickListener(v->{
@@ -306,9 +380,10 @@ public final class MainActivity extends Activity {
             final int code=codes[i];
             final String name=titles[i];
             Button chip=button(name);
-            chip.setTextSize(tvLayout?13:12);
+            chip.setTextSize(compactTvPreview?11:tvLayout?13:12);
             chip.setMinHeight(0);chip.setMinimumHeight(0);
-            chip.setPadding(dp(15),0,dp(15),0);
+            chip.setPadding(dp(compactTvPreview?10:15),0,
+                dp(compactTvPreview?10:15),0);
             chip.setOnClickListener(v->{
                 if(code==-3){categories();return;}
                 if(code==-1 || code==-2){
@@ -321,14 +396,16 @@ public final class MainActivity extends Activity {
                     load("","latest");
                 }
             });
-            tabs.addView(chip,spaced(-2,tvLayout?42:39,8,0));
+            tabs.addView(chip,spaced(-2,
+                compactTvPreview?35:tvLayout?42:39,compactTvPreview?5:8,0));
             filterButtons.add(chip);filterCodes.add(code);
         }
         android.widget.HorizontalScrollView strip=new android.widget.HorizontalScrollView(this);
         strip.setHorizontalScrollBarEnabled(false);
         strip.setFillViewport(false);
         strip.addView(tabs);
-        LinearLayout.LayoutParams strips=lp(-1,tvLayout?69:60);
+        LinearLayout.LayoutParams strips=lp(-1,
+            compactTvPreview?47:tvLayout?69:60);
         strips.topMargin=dp(6);
         app.addView(strip,strips);
 
@@ -372,13 +449,17 @@ public final class MainActivity extends Activity {
         }
     }
     private void moreOptions() {
-        String[] choices={"Выбор сайта","Категории сайта","Диагностика источников","Настройки"};
+        String[] choices={"Выбор сайта","Категории сайта",
+            "Диагностика источников","Настройки",
+            prefs.getBoolean("tv_preview",false)?
+                "Выключить ТВ-режим":"Включить ТВ-режим (горизонтально)"};
         new AlertDialog.Builder(this).setTitle("MediaShelf")
             .setItems(choices,(d,i)->{
                 if(i==0)chooseSource();
                 else if(i==1)categories();
                 else if(i==2)diagnostics();
-                else settings(false);
+                else if(i==3)settings(false);
+                else toggleTvPreview();
             }).show();
     }
     private void refreshSourceMenu() {
