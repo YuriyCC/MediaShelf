@@ -43,3 +43,12 @@ jobs:
           else
             gh release create v0.1-test MediaShelf-0.1-test.apk --title "MediaShelf 0.1 — test APK" --notes "Тестовая Android TV сборка. Введите адрес Jackett, API ключ и адрес TorrServer в настройках приложения. Не протестировано на реальном телевизоре." --prerelease
           fi
+      - name: Package exact source snapshot
+        run: git archive --format=zip --output=MediaShelf-source.zip HEAD
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: MediaShelf-source
+          path: MediaShelf-source.zip
+          if-no-files-found: error
+          retention-days: 14
