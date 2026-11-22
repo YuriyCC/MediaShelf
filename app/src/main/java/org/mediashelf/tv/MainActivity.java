@@ -122,8 +122,8 @@ public final class MainActivity extends Activity {
         activeSource=prefs.getString("indexer","xxxclub");
         sources.addAll(SourceRegistry.fromCache(prefs.getString("source_cache","[]")));
         ui();
-        if (prefs.getString("api_key","").isEmpty()) settings(true);
-        else { loadSources(); load("","latest"); }
+        if (!prefs.getString("api_key","").isEmpty())loadSources();
+        load("","latest");
     }
     private void ui() {
         int screenWidthDp=getResources().getConfiguration().screenWidthDp;
@@ -167,7 +167,7 @@ public final class MainActivity extends Activity {
             TextView title=label("MediaShelf",24,WHITE,true);
             header.addView(title,new LinearLayout.LayoutParams(0,dp(48),1));
         } else {
-            TextView title=label("Каталог фильмов",26,WHITE,true);
+            TextView title=label("Медиатека 18+",26,WHITE,true);
             header.addView(title,new LinearLayout.LayoutParams(0,dp(54),1));
         }
         sourceSelector=button("Источник: "+activeSource);
@@ -180,7 +180,7 @@ public final class MainActivity extends Activity {
             header.addView(options,op);
         }
         app.addView(header);
-        status=label("Подключение к Jackett...",14,MUTED,false);
+        status=label("Каталог · выбирай источник",14,MUTED,false);
         app.addView(status,lp(-1,42));
         LinearLayout searchRow=line();
         queryInput=new EditText(this);
@@ -250,38 +250,30 @@ public final class MainActivity extends Activity {
             }).show();
     }
     private void refreshSourceMenu() {
-        String title=activeSource.equals("all")?"Все сайты":activeSource;
-        SourceRegistry.Source active=SourceRegistry.byId(sources,activeSource);
-        if(active!=null)title=active.name;
+        SiteCatalog.Site current=SiteCatalog.byId(activeSource);
+        String title=activeSource.equals("all")?"Все источники":
+            current!=null?current.title:activeSource;
         if(sourceSelector!=null)sourceSelector.setText(title+"  ▾");
         if(sourceButtons==null)return;
         sourceButtons.removeAllViews();
-        if(sourceSummary!=null)sourceSummary.setText(
-            loadingSources ? "Загрузка сайтов..." :
-            sources.isEmpty() ? "Источники пока не получены" :
-            "Источники · "+sources.size()+(sourceListError.isEmpty()?"":" (кеш)"));
-        if(sources.isEmpty()) {
-            Button first=button("XXXClub");
-            first.setOnClickListener(v->selectSource("xxxclub"));
-            sourceButtons.addView(first,lp(-1,43));
-        }
-        for(SourceRegistry.Source src:sources) {
-            String text=src.name;
-            String previous=probeResults.get(src.id);
-            if(previous!=null)text+=(previous.startsWith("OK")?" ✓":" !");
-            else if(!src.lastError.isEmpty())text+=" · ?";
+        if(sourceSummary!=null)
+            sourceSummary.setText("Источники · "+SiteCatalog.all().size()+"\nПрямое подключение: 1");
+        for(SiteCatalog.Site site:SiteCatalog.all()) {
+            String text=site.title+(site.direct?"  ●":"  ·");
             Button b=button(text);
             b.setTextSize(12);
-            if(activeSource.equals(src.id))b.setTextColor(0xffa8c6ff);
-            b.setOnClickListener(v->selectSource(src.id));
-            sourceButtons.addView(b,lp(-1,43));
+            if(activeSource.equals(site.id))b.setTextColor(0xffa8c6ff);
+            b.setContentDescription(site.title+", "+site.mode());
+            b.setOnClickListener(v->selectSource(site.id));
+            sourceButtons.addView(b,lp(-1,45));
         }
-        Button other=button("+ Выбрать другой сайт");
-        other.setOnClickListener(v->chooseSource());
-        sourceButtons.addView(other,lp(-1,48));
-        Button update=button("Обновить список");
-        update.setOnClickListener(v->loadSources());
-        sourceButtons.addView(update,lp(-1,45));
+        Button all=button("Все подключённые");
+        all.setTextSize(12);
+        all.setOnClickListener(v->selectSource("all"));
+        sourceButtons.addView(all,lp(-1,47));
+        Button add=button("+ Добавить источник");
+        add.setOnClickListener(v->chooseSource());
+        sourceButtons.addView(add,lp(-1,46));
     }
     private void loadSources() {
         if(loadingSources)return;
@@ -320,43 +312,19 @@ public final class MainActivity extends Activity {
         });
     }
     private void chooseSource() {
-        // The chooser must always work, even when the Jackett indexer-list endpoint
-        // returns HTML, errors or times out.
-        final List<SourceRegistry.Source> available=new ArrayList<>(sources);
-        available.sort(Comparator.comparing(a->a.name.toLowerCase(Locale.ROOT)));
         List<String> titles=new ArrayList<>();
         List<String> ids=new ArrayList<>();
-        titles.add("Все сайты — общий поиск"); ids.add("all");
-        boolean hasXXX=false;
-        for(SourceRegistry.Source src:available)if(src.id.equals("xxxclub"))hasXXX=true;
-        if(!hasXXX) {
-            titles.add("XXXClub — проверенный ранее источник");ids.add("xxxclub");
+        titles.add("Все подключённые источники");ids.add("all");
+        for(SiteCatalog.Site site:SiteCatalog.all()){
+            titles.add(site.title+" · "+(site.direct?"прямое подключение":"модуль в разработке"));
+            ids.add(site.id);
         }
-        for(SourceRegistry.Source src:available) {
-            titles.add(src.name+(src.id.equals(activeSource)?"  ✓":""));
-            ids.add(src.id);
-        }
-        titles.add("Указать сайт по ID вручную"); ids.add("__manual");
-        titles.add(loadingSources?"Список загружается...":"Обновить список из Jackett");
-        ids.add("__refresh");
-        String message=loadingSources?"Идёт загрузка списка Jackett":
-            sourceListError.isEmpty()?"Источники Jackett: "+available.size():
-                "Не удалось загрузить список: "+sourceListError+
-                "\nМожно выбрать известный сайт или указать его ID.";
-        if(!sourceListError.isEmpty())
-            Toast.makeText(this,"Список Jackett недоступен. Можно выбрать сайт по ID вручную.",Toast.LENGTH_LONG).show();
-        String dialogTitle="Выбор сайта · "+available.size()+
-            (loadingSources?" (загрузка)":sourceListError.isEmpty()?"":" (офлайн)");
-        // Android AlertDialog cannot show setMessage and setItems simultaneously:
-        // the message view hides the selectable list.
-        new AlertDialog.Builder(this).setTitle(dialogTitle)
-            .setItems(titles.toArray(new String[0]),(d,i)->{
-                String id=ids.get(i);
+        titles.add("Дополнительно: индексатор Jackett по ID");ids.add("__manual");
+        new AlertDialog.Builder(this).setTitle("Каталог источников 18+")
+            .setItems(titles.toArray(new String[0]),(dialog,index)->{
+                String id=ids.get(index);
                 if(id.equals("__manual"))manualSource();
-                else if(id.equals("__refresh")) {
-                    loadSources();
-                    Toast.makeText(this,"Обновляем список сайтов",Toast.LENGTH_SHORT).show();
-                } else selectSource(id);
+                else selectSource(id);
             }).setNegativeButton("Закрыть",null).show();
     }
     private void manualSource() {
@@ -389,6 +357,18 @@ public final class MainActivity extends Activity {
     private void selectSource(String id) {
         if(!id.equals("all") && !id.matches("[a-zA-Z0-9_-]{1,80}"))return;
         activeSource=id;
+        if(!id.equals("xxxclub") && !id.equals("all") &&
+            prefs.getString("api_key","").isEmpty()){
+            SiteCatalog.Site site=SiteCatalog.byId(id);
+            if(site!=null && !site.direct){
+                new AlertDialog.Builder(this).setTitle(site.title)
+                    .setMessage("Прямой модуль этого сайта ещё разрабатывается. "+
+                        "Пока возможен поиск через Jackett при наличии настроенного индексатора. "+
+                        "Для XXXClub Jackett больше не нужен.")
+                    .setPositiveButton("Открыть настройки",(dialog,which)->settings(false))
+                    .setNegativeButton("Продолжить",null).show();
+            }
+        }
         currentCategory=0;
         currentCategoryLabel="";
         prefs.edit().putString("indexer",id).apply();
@@ -592,58 +572,113 @@ public final class MainActivity extends Activity {
         cards.addView(t);
     }
     private void load(String q,String order) {
-        lastQuery=q;lastSort=order;
-        String api=prefs.getString("api_key","");
-        if(api.isEmpty()){settings(true);return;}
-        String base=prefs.getString("jackett_url","http://192.168.50.2:9117");
-        String source=activeSource;
-        int category=currentCategory;
-        int req=++serial;
-        SourceRegistry.Source named=SourceRegistry.byId(sources,source);
-        String friendly=source.equals("all")?"Все сайты":named!=null?named.name:source;
-        status.setText((order.equals("latest")?"Новинки":order.equals("popular")?"Популярное":"Поиск: "+q)+
-            " · "+friendly+(category>0?" · "+currentCategoryLabel:""));
+        lastQuery=q;
+        lastSort=order;
+        final String source=activeSource;
+        final int category=currentCategory;
+        final int requestId=++serial;
         if(catalogScroll!=null)catalogScroll.scrollTo(0,0);
-        message("Ищем раздачи...");
+        SiteCatalog.Site configuredSite=SiteCatalog.byId(source);
+        String friendly=source.equals("all")?"Все подключённые":
+            configuredSite!=null?configuredSite.title:source;
+        String section=order.equals("latest")?"Новинки":order.equals("popular")?"Популярное":"Поиск: "+q;
+        status.setText(section+" · "+friendly+
+            (category>0?" · "+currentCategoryLabel:""));
+        catalogItems.clear();sitePageCursor=null;loadingNextPage=false;visibleCount=60;
+        pageInfo="";
+        message("Идёт поиск…");
+        final String api=prefs.getString("api_key","");
+        final String base=prefs.getString("jackett_url","http://192.168.50.2:9117");
+
+        NativeSource direct=NativeSources.get(source.equals("all")?"xxxclub":source);
+        if(direct!=null) {
+            worker.execute(()->{
+                SitePages.Cursor cursor=direct.begin(q,source.equals("all")?0:category);
+                try {
+                    SitePages.Page first=direct.fetchNext(cursor,source.equals("all")?0:category);
+                    List<Item> results=new ArrayList<>(first.items);
+                    if(order.equals("popular"))
+                        results.sort(Comparator.comparingInt((Item item)->item.seeders).reversed());
+                    main.post(()->{
+                        if(isFinishing() || requestId!=serial)return;
+                        catalogItems.clear();catalogItems.addAll(results);
+                        sitePageCursor=cursor;
+                        visibleCount=60;
+                        pageInfo=(source.equals("all")
+                            ?"Общий каталог пока включает только прямой модуль XXXClub. "+
+                              "Другие сайты подключим после разработки их модулей. "
+                            :"Прямой каталог XXXClub · без Jackett. ")+
+                            first.message+" · полнота каталога зависит от страниц сайта";
+                        show(catalogItems);
+                    });
+                }catch(Exception directError) {
+                    if(api.isEmpty()) {
+                        main.post(()->{
+                            if(isFinishing() || requestId!=serial)return;
+                            sitePageCursor=cursor;
+                            pageInfo="Сайт не ответил напрямую: "+error(directError)+
+                                ". Можно повторить загрузку или настроить Jackett как резерв.";
+                            show(catalogItems);
+                        });
+                        return;
+                    }
+                    // Bridge fallback ONLY when direct parsing fails, not the default.
+                    try {
+                        Jackett.SearchReport bridged=Jackett.searchReport(base,api,"xxxclub",q,
+                                source.equals("all")?0:category,25000);
+                        List<Item> results=new ArrayList<>(bridged.items);
+                        main.post(()->{
+                            if(isFinishing() || requestId!=serial)return;
+                            catalogItems.clear();catalogItems.addAll(results);
+                            sitePageCursor=cursor;
+                            pageInfo="Прямой сайт недоступен: "+error(directError)+
+                                ". Результаты временно получены через Jackett; "+
+                                "возможна неполная первая страница.";
+                            show(catalogItems);
+                        });
+                    }catch(Exception fallbackError){
+                        main.post(()->{
+                            if(isFinishing() || requestId!=serial)return;
+                            sitePageCursor=cursor;
+                            pageInfo="Прямой сайт: "+error(directError)+
+                                "; резервный Jackett: "+error(fallbackError)+
+                                ". Попробуй загрузить страницу ещё раз.";
+                            show(catalogItems);
+                        });
+                    }
+                }
+            });
+            return;
+        }
+
+        if(api.isEmpty()) {
+            pageInfo="Для "+friendly+" прямой модуль ещё не готов. "+
+                "Пока можно подключить сайт через Jackett в настройках. "+
+                "XXXClub уже работает без Jackett.";
+            show(catalogItems);
+            return;
+        }
         worker.execute(()->{
             try {
                 Jackett.SearchReport report=Jackett.searchReport(base,api,source,q,category,35000);
-                List<Item> result=report.items;
+                List<Item> results=new ArrayList<>(report.items);
                 if(order.equals("popular"))
-                    result.sort(Comparator.comparingInt((Item x)->x.seeders).reversed());
-                else if(order.equals("latest"))
-                    result.sort(Comparator.comparing((Item x)->x.date).reversed());
+                    results.sort(Comparator.comparingInt((Item x)->x.seeders).reversed());
                 main.post(()->{
-                    if(req!=serial || isFinishing())return;
-                    catalogItems.clear();
-                    catalogItems.addAll(result);
-                    sitePageCursor=SitePages.supported(source)?SitePages.start(q,category):null;
-                    visibleCount=60;
-                    loadingNextPage=false;
-                    pageInfo=source.equals("xxxclub")
-                        ?"Jackett показывает только первую страницу сайта. Для остальных фильмов нажми «Загрузить ещё с XXXClub».":
-                        "Результаты предоставлены Jackett; охват страниц зависит от индексатора.";
+                    if(requestId!=serial||isFinishing())return;
+                    catalogItems.clear();catalogItems.addAll(results);
+                    sitePageCursor=null;visibleCount=60;
+                    pageInfo="Временный режим Jackett · первые результаты индексатора. "+
+                        "Полная пагинация будет в прямом модуле этого сайта. "+
+                        report.warning;
                     show(catalogItems);
-                    if(source.equals("all") && !report.discovered.isEmpty())
-                        mergeDiscoveredSources(report.discovered);
-                    if(!report.warning.isEmpty()) {
-                        TextView warn=label(report.warning,12,0xffffc56a,false);
-                        warn.setPadding(0,0,0,dp(10));
-                        cards.addView(warn,0);
-                    }
                 });
             }catch(Exception e){
                 main.post(()->{
-                    if(req==serial && !isFinishing()) {
-                        catalogItems.clear();
-                        sitePageCursor=SitePages.supported(source)?SitePages.start(q,category):null;
-                        visibleCount=60;
-                        pageInfo="Jackett не предоставил список: "+error(e)+
-                            ". Можно попробовать чтение страниц XXXClub напрямую.";
-                        if(sitePageCursor!=null)show(catalogItems);
-                        else message("Ошибка поиска в "+friendly+": "+error(e)+
-                            "\nПроверь подключение к Jackett или переключи источник.");
-                    }
+                    if(requestId!=serial || isFinishing())return;
+                    pageInfo="Нет результатов: "+error(e)+
+                        ". Проверь поддержку и настройки этого индексатора в Jackett.";
+                    show(catalogItems);
                 });
             }
         });
