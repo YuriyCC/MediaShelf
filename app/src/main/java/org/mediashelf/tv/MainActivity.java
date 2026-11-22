@@ -169,8 +169,9 @@ public final class MainActivity extends Activity {
         int screenWidthDp=getResources().getConfiguration().screenWidthDp;
         int mode=getResources().getConfiguration().uiMode &
             android.content.res.Configuration.UI_MODE_TYPE_MASK;
+        int screenHeightDp=getResources().getConfiguration().screenHeightDp;
         tvLayout=(mode==android.content.res.Configuration.UI_MODE_TYPE_TELEVISION)||
-            screenWidthDp>=680;
+            (screenWidthDp>=840 && screenHeightDp>=550);
         getWindow().setStatusBarColor(MediaDesign.BG);
         getWindow().setNavigationBarColor(MediaDesign.BG);
         if(mode==android.content.res.Configuration.UI_MODE_TYPE_TELEVISION)
@@ -960,12 +961,12 @@ public final class MainActivity extends Activity {
             return;
         }
         int screen=getResources().getConfiguration().screenWidthDp;
-        int usable=screen-(tvLayout?302:32);
+        int usable=Math.max(284,screen-(tvLayout?314:48));
         int spacing=tvLayout?14:10;
         int columns=tvLayout?
-            Math.max(3,Math.min(6,(usable+spacing)/188)):
+            Math.max(2,Math.min(6,usable/186)):
             2;
-        int cardWidth=Math.max(tvLayout?160:130,(usable-(columns-1)*spacing)/columns);
+        int cardWidth=Math.max(126,(usable-columns*spacing-4)/columns);
         int coverHeight=(int)(cardWidth*(tvLayout?1.25f:1.12f));
         GridLayout grid=new GridLayout(this);
         grid.setColumnCount(columns);
@@ -1170,6 +1171,7 @@ public final class MainActivity extends Activity {
         final int category=currentCategory;
         final Set<String> existing=new HashSet<>();
         for(Item item:catalogItems)existing.add(catalogKey(item));
+        focusItemAfterLoad=-1;
         pageInfo="Получаем следующую страницу каталога XXXClub…";
         show(catalogItems);
         worker.execute(()->{
@@ -1204,6 +1206,7 @@ public final class MainActivity extends Activity {
                 main.post(()->{
                     if(isFinishing() || job!=serial || sitePageCursor!=cursor)return;
                     loadingNextPage=false;
+                    focusItemAfterLoad=-1;
                     pageInfo="Не удалось получить страницу XXXClub: "+failure+
                         ". Повтори попытку или проверь страницу в браузере.";
                     show(catalogItems);
