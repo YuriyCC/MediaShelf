@@ -4,7 +4,7 @@ on:
     branches: [main]
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   android:
     runs-on: ubuntu-latest
@@ -33,3 +33,13 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+      - name: Publish downloadable test APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk MediaShelf-0.1-test.apk
+          if gh release view v0.1-test >/dev/null 2>&1; then
+            gh release upload v0.1-test MediaShelf-0.1-test.apk --clobber
+          else
+            gh release create v0.1-test MediaShelf-0.1-test.apk --title "MediaShelf 0.1 — test APK" --notes "Тестовая Android TV сборка. Введите адрес Jackett, API ключ и адрес TorrServer в настройках приложения. Не протестировано на реальном телевизоре." --prerelease
+          fi
