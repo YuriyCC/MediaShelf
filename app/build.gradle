@@ -32,6 +32,8 @@ android {
         }
         release { minifyEnabled false }
     }
+    // Sideload prototype, not a Google Play submission.
+    lint { disable 'ExpiredTargetSdkVersion' }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
