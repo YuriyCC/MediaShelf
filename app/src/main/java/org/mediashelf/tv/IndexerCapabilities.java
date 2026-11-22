@@ -63,9 +63,12 @@ final class IndexerCapabilities {
     static List<SourceRegistry.Category> known(String source) {
         List<SourceRegistry.Category> cats=new ArrayList<>();
         if(source.equals("xxxclub")) {
-            // Exact Torznab IDs from Jackett's own xxxclub.yml and TorznabCatType.
+            // All eight native categories (0..7) from Jackett xxxclub.yml.
+            // Its common Torznab 6040 maps BOTH 720p and 1080p; the native
+            // browser must keep them separate, using local IDs 10001/10002.
             cats.add(new SourceRegistry.Category(6090,"Полные фильмы · DVD / WEB"));
-            cats.add(new SourceRegistry.Category(6040,"HD · 720p и 1080p"));
+            cats.add(new SourceRegistry.Category(10001,"HD · 720p"));
+            cats.add(new SourceRegistry.Category(10002,"FullHD · 1080p"));
             cats.add(new SourceRegistry.Category(6045,"4K / UHD"));
             cats.add(new SourceRegistry.Category(6080,"SD · 480p"));
             cats.add(new SourceRegistry.Category(6050,"Сборники / Packs"));
