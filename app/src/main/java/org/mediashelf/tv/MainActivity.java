@@ -335,7 +335,13 @@ public final class MainActivity extends Activity {
             sourceListError.isEmpty()?"Источники Jackett: "+available.size():
                 "Не удалось загрузить список: "+sourceListError+
                 "\nМожно выбрать известный сайт или указать его ID.";
-        new AlertDialog.Builder(this).setTitle("Выбор сайта").setMessage(message)
+        if(!sourceListError.isEmpty())
+            Toast.makeText(this,"Список Jackett недоступен. Можно выбрать сайт по ID вручную.",Toast.LENGTH_LONG).show();
+        String dialogTitle="Выбор сайта · "+available.size()+
+            (loadingSources?" (загрузка)":sourceListError.isEmpty()?"":" (офлайн)");
+        // Android AlertDialog cannot show setMessage and setItems simultaneously:
+        // the message view hides the selectable list.
+        new AlertDialog.Builder(this).setTitle(dialogTitle)
             .setItems(titles.toArray(new String[0]),(d,i)->{
                 String id=ids.get(i);
                 if(id.equals("__manual"))manualSource();
