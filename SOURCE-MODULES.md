@@ -44,3 +44,8 @@
 - Не удалять существующий пакет: applicationId = org.mediashelf.tv.
 - Новые версии: 0.9, 1.0, 1.1... (без 0.8.1), с последовательными versionCode.
 - APK и ZIP восстановления в чат; ZIP содержит приватный ключ, не публикуется на GitHub.
+
+## 0.9 — Cursor navigation
+- Verified by user: on XXXClub first page about 51 items and a visible Next Page button pointing to /torrents/search/all/Gangbang/7296816424212307464.
+- 0.9 expands the native adapter to find same-search cursors across the document and interpret Next Page, rather than numeric pages.
+- Offline tests cover the real URL format. Live functionality still requires device verification.

@@ -103,3 +103,13 @@ Implemented in this commit:
 - Some sites return thumbnails rather than portrait posters and require dedicated detail parsers, not generic assumptions.
 - No adult torrent indexer list is considered endorsed solely because it appears in the registry: reliability, moderation, quality of releases and live access must be checked independently.
 - Each module must pass live search (query+category), full pagination, image, details, torrent URL and playback tests, plus a negative test when the site is unavailable. Tested per site, not inferred from Jackett discovery.
+
+## 0.9 — XXXClub opaque-cursor Next Page repair
+
+User confirmed: after the first-page search at https://xxxclub.to/torrents/search/all/Gangbang the website's Next Page button opens https://xxxclub.to/torrents/search/all/Gangbang/7296816424212307464. The suffix is a long numeric cursor, not a page number. The site's navigation has no numeric page links.
+
+Bug in 0.8: SitePages.findNext scanned only CSS .pagination, .pager, .next and exact 'next' text, so an ordinary Next Page anchor was missed. MediaShelf incorrectly labeled the 51-result first page "last".
+
+0.9 searches "Next Page" anchors anywhere in the HTML, along with data-href and onclick handlers, using same-listing cursor URLs, never manufacturing tokens. If no continuation found, it states that this does NOT prove the site's catalog ended. Nine offline regression tests reproduce the user's URL format; CI runs testDebugUnitTest before packaging.
+
+The user-provided link proves the URL scheme, but the live HTML could not be retrieved in the build environment. This is NOT yet a live end-to-end verification of all pages, and there is no claim the full site catalog is indexed. The optional Jackett bridge is unchanged; applicationId and signing certificate remain stable; versionCode 9.
