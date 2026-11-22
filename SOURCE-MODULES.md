@@ -62,3 +62,9 @@
 - Launcher icon `res/drawable/ic_mediashelf.xml`, TV banner `res/drawable/banner_mediashelf.xml`.
 - User requirement: no `test` in visible app name or version; stable package and certificate are preserved; the private key's filename and alias must NOT be changed.
 - TV acceptance: remote navigation across left menu / search / category chips / poster cards, back from details, poster loading, page 2+ in keyword search and categories, play a file on TorrServer.
+
+## Версия 1.2: проверка дизайна телефона до Android TV
+- Единая нативная ТВ-компоновка доступна на телефоне через `⋮ → Включить ТВ-режим (горизонтально)`.
+- В режиме ТВ на телефоне можно выйти в обычную компоновку кнопкой `Режим телефона`.
+- Компоненты масштабируются под горизонтальный экран телефона без выдачи имитации за реальное телевизионное разрешение.
+- Поиск XXXClub, выбор разделов, постеры и переходы по страницам не меняются.

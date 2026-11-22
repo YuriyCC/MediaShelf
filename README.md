@@ -145,3 +145,11 @@ Features:
 - Direct XXXClub search, site cursor pagination and the 15 automated regression tests from 1.0 remain; Jackett is an optional fallback, not required for the first site.
 
 Validation in CI: `gradle testDebugUnitTest assembleRelease`. Actual remote-control behavior, site access, poster quality and TorrServer playback must be verified on a real Android TV. **Do not mark the XXXClub module fully certified until end-to-end testing.**
+
+## MediaShelf 1.2 — ТВ-предпросмотр на телефоне
+
+Доступен пункт `⋮ → Включить ТВ-режим (горизонтально)` в приложении на телефоне. Он сохраняет `tv_preview=true` локально, переводит экран в альбомную ориентацию и использует настоящее ТВ-меню MediaShelf вместо статического макета. Возврат к телефонному виду через кнопку `Режим телефона` внизу боковой панели. Переустановка не требуется для переключения; сохранены исходные настройки источников, поиск и TorrServer.
+
+На небольшом горизонтальном экране предпросмотр автоматически уменьшает боковое меню, заголовки, поиск, фильтры, баннер и высоту постеров. На реальном Android TV этот телефонный режим не появляется и телевизионная разметка 1.1 остаётся прежней. Версия приложения называется `1.2`, без `-test`. Пакет и сертификат подписи прежние. После смены ориентации восстанавливаются слова поиска, сортировка и выбранная категория; выдача обновляется.
+
+Проверка: `gradle testDebugUnitTest assembleRelease`, затем ручная проверка горизонтального телефона. Предпросмотр не заменяет отдельную проверку реальным пультом.
