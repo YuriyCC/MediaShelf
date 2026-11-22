@@ -422,21 +422,40 @@ public final class MainActivity extends Activity {
     }
     private void load(String q,String order) {
         lastQuery=q;lastSort=order;
-        String api = prefs.getString("api_key","");
-        if (api.isEmpty()) {settings(true);return;}
+        String api=prefs.getString("api_key","");
+        if(api.isEmpty()){settings(true);return;}
         String base=prefs.getString("jackett_url","http://192.168.50.2:9117");
-        String idx=prefs.getString("indexer","xxxclub");
+        String source=activeSource;
+        int category=currentCategory;
         int req=++serial;
-        status.setText((order.equals("latest")?"Новинки":order.equals("popular")?"Популярное":"Поиск: "+q)+" · "+idx);
+        SourceRegistry.Source named=SourceRegistry.byId(sources,source);
+        String friendly=source.equals("all")?"Все сайты":named!=null?named.name:source;
+        status.setText((order.equals("latest")?"Новинки":order.equals("popular")?"Популярное":"Поиск: "+q)+
+            " · "+friendly+(category>0?" · "+currentCategoryLabel:""));
         message("Ищем раздачи...");
-        worker.execute(() -> {
+        worker.execute(()->{
             try {
-                List<Item> result = Jackett.search(base,api,idx,q);
-                if(order.equals("popular")) result.sort(Comparator.comparingInt((Item x)->x.seeders).reversed());
-                else if(order.equals("latest")) result.sort(Comparator.comparing((Item x)->x.date).reversed());
-                main.post(() -> {if(req==serial && !isFinishing()) show(result);});
-            } catch(Exception e) {
-                main.post(() -> {if(req==serial && !isFinishing()) message("Не удалось получить раздачи: "+error(e)+"\nПроверь настройки и доступность Jackett.");});
+                Jackett.SearchReport report=Jackett.searchReport(base,api,source,q,category,35000);
+                List<Item> result=report.items;
+                if(order.equals("popular"))
+                    result.sort(Comparator.comparingInt((Item x)->x.seeders).reversed());
+                else if(order.equals("latest"))
+                    result.sort(Comparator.comparing((Item x)->x.date).reversed());
+                main.post(()->{
+                    if(req!=serial || isFinishing())return;
+                    show(result);
+                    if(!report.warning.isEmpty()) {
+                        TextView warn=label(report.warning,12,0xffffc56a,false);
+                        warn.setPadding(0,0,0,dp(10));
+                        cards.addView(warn,0);
+                    }
+                });
+            }catch(Exception e){
+                main.post(()->{
+                    if(req==serial && !isFinishing())
+                        message("Ошибка поиска в "+friendly+": "+error(e)+
+                            "\nПроверь подключение к Jackett или переключи источник.");
+                });
             }
         });
     }
@@ -452,9 +471,10 @@ public final class MainActivity extends Activity {
         if(items.isEmpty()) { message("Результатов нет. Попробуй другой запрос или источник.");return; }
         TextView count=label("Найдено: "+items.size()+" · изображения показываются, если их передаёт источник",13,MUTED,false);
         count.setPadding(0,0,0,dp(12));cards.addView(count);
-        int width=getResources().getDisplayMetrics().widthPixels;
-        int cols=Math.max(2,Math.min(5,width / dp(215)));
-        int cardW=Math.max(140,(width/dp(1)-52-(cols-1)*10)/cols);
+        int usableDp=getResources().getConfiguration().screenWidthDp-(tvLayout?280:34);
+        int cols=tvLayout ? Math.max(3,Math.min(6,usableDp/200)) : 2;
+        int cardW=Math.max(130,(usableDp-(cols-1)*10)/cols);
+
         GridLayout grid = new GridLayout(this);grid.setColumnCount(cols);
         cards.addView(grid);
         for(int i=0;i<Math.min(120,items.size());i++) {
@@ -465,7 +485,7 @@ public final class MainActivity extends Activity {
             tile.setOnFocusChangeListener((v,f)->v.setBackground(panel(f?0xff34415c:PANEL,f)));
             ImageView img=new ImageView(this);img.setScaleType(ImageView.ScaleType.CENTER_CROP);
             img.setBackground(panel(0xff34425e,false));
-            tile.addView(img,lp(-1,132));
+            tile.addView(img,lp(-1,tvLayout?166:132));
             loadPoster(img,item,i<18);
             TextView name=label(item.title,13,WHITE,true);
             name.setMaxLines(3);name.setEllipsize(TextUtils.TruncateAt.END);
@@ -475,14 +495,25 @@ public final class MainActivity extends Activity {
             meta.setSingleLine(true);meta.setEllipsize(TextUtils.TruncateAt.END);
             tile.addView(meta);
             tile.setOnClickListener(v->details(item));
+            tile.setOnKeyListener((v,key,event)->{
+                if(event.getAction()==android.view.KeyEvent.ACTION_DOWN &&
+                   (key==android.view.KeyEvent.KEYCODE_DPAD_CENTER || key==android.view.KeyEvent.KEYCODE_ENTER)) {
+                    details(item);return true;
+                }
+                return false;
+            });
             GridLayout.LayoutParams p=new GridLayout.LayoutParams(GridLayout.spec(i/cols),GridLayout.spec(i%cols));
-            p.width=dp(cardW);p.height=dp(232);p.rightMargin=dp(10);p.bottomMargin=dp(10);
+            p.width=dp(cardW);p.height=dp(tvLayout?270:232);p.rightMargin=dp(10);p.bottomMargin=dp(10);
             grid.addView(tile,p);
         }
     }
     private static String referer(Item item) {
-        try { Uri url=Uri.parse(item.details); return url.getScheme()+"://"+url.getAuthority()+"/"; }
-        catch(Exception e) { return "https://xxxclub.to/"; }
+        try {
+            Uri url=Uri.parse(item.details);
+            if(url.getScheme()!=null && url.getAuthority()!=null)
+                return url.getScheme()+"://"+url.getAuthority()+"/";
+        }catch(Exception ignored){}
+        return "https://xxxclub.to/";
     }
     private void loadPoster(ImageView view, Item item, boolean prefetch) {
         view.setTag(item);
@@ -611,26 +642,22 @@ public final class MainActivity extends Activity {
         parent.addView(field,lp(-1,49));return field;
     }
     private void settings(boolean first) {
-        LinearLayout root=column();root.setPadding(dp(18),dp(10),dp(18),dp(10));
+        LinearLayout root=column();
+        root.setPadding(dp(18),dp(10),dp(18),dp(10));
         EditText jackett=field(root,"Jackett",prefs.getString("jackett_url","http://192.168.50.2:9117"),false);
         EditText key=field(root,"Jackett API key",prefs.getString("api_key",""),true);
         EditText torr=field(root,"TorrServer",prefs.getString("torr_url","http://127.0.0.1:8090"),false);
-        root.addView(label("Источник",14,MUTED,true));
-        Spinner source=new Spinner(this);
-        ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_item,INDEXERS);
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        source.setAdapter(adapter);
-        for(int n=0;n<INDEXERS.length;n++)if(INDEXERS[n].equals(prefs.getString("indexer","xxxclub")))source.setSelection(n);
-        root.addView(source);
-        TextView note=label("Источник 'all' ищет по всем индексаторам Jackett. Ключ хранится только в настройках Android.",12,MUTED,false);
-        note.setPadding(0,dp(10),0,0);root.addView(note);
+        TextView selected=label("Выбранный источник: "+activeSource+"\nВыбор сайтов и категории находятся на главном экране. Список сайтов загружается автоматически из Jackett.",13,MUTED,false);
+        selected.setPadding(0,dp(15),0,dp(10));
+        root.addView(selected);
         ScrollView scroll=new ScrollView(this);scroll.addView(root);
-        AlertDialog.Builder b=new AlertDialog.Builder(this).setTitle("Настройки подключения").setView(scroll)
+        AlertDialog.Builder b=new AlertDialog.Builder(this).setTitle("Подключения").setView(scroll)
             .setPositiveButton("Сохранить",(d,w)->{
                 prefs.edit().putString("jackett_url",jackett.getText().toString().trim())
                     .putString("api_key",key.getText().toString().trim())
                     .putString("torr_url",torr.getText().toString().trim())
-                    .putString("indexer",source.getSelectedItem().toString()).apply();
+                    .putString("indexer",activeSource).apply();
+                loadSources();
                 load(lastQuery,lastSort);
             });
         if(!first)b.setNegativeButton("Отмена",null);
@@ -667,27 +694,68 @@ public final class MainActivity extends Activity {
         }
     }
     static final class Jackett {
-        static List<Item> search(String base,String key,String indexer,String query) throws Exception {
-            if(!base.startsWith("http"))throw new IllegalArgumentException("Укажи адрес Jackett с http://");
-            String uri=base.replaceAll("/+$","")+"/api/v2.0/indexers/"+Uri.encode(indexer)+"/results?apikey="+Uri.encode(key)+"&Query="+Uri.encode(query);
+        static final class SearchReport {
+            final List<Item> items;
+            final String warning;
+            SearchReport(List<Item> items,String warning){
+                this.items=items;this.warning=warning;
+            }
+        }
+        static SearchReport searchReport(String base,String key,String indexer,
+                                         String query,int category,int timeoutMs) throws Exception {
+            if(!base.startsWith("http://") && !base.startsWith("https://"))
+                throw new IllegalArgumentException("Укажи адрес Jackett с http://");
+            if(!indexer.matches("[a-zA-Z0-9_-]{1,80}"))
+                throw new IllegalArgumentException("Неверный ID сайта");
+            String uri=base.replaceAll("/+$","")+
+                "/api/v2.0/indexers/"+Uri.encode(indexer)+"/results?apikey="+Uri.encode(key)+
+                "&Query="+Uri.encode(query);
+            if(category>0)uri+="&Category%5B%5D="+category;
             HttpURLConnection c=(HttpURLConnection)new URL(uri).openConnection();
             try {
-                c.setConnectTimeout(10000);c.setReadTimeout(35000);
+                c.setConnectTimeout(Math.min(timeoutMs,10000));
+                c.setReadTimeout(timeoutMs);
                 c.setRequestProperty("Accept","application/json");
-                if(c.getResponseCode()!=200)throw new IllegalStateException("Jackett HTTP "+c.getResponseCode());
+                int status=c.getResponseCode();
+                if(status!=200) throw new IllegalStateException("Jackett HTTP "+status);
                 JSONObject response;
                 try(InputStream in=c.getInputStream()){response=new JSONObject(read(in));}
                 JSONArray raw=response.optJSONArray("Results");
                 if(raw==null)raw=response.optJSONArray("results");
                 List<Item> out=new ArrayList<>();Set<String> seen=new HashSet<>();
-                if(raw!=null)for(int i=0;i<raw.length();i++){
-                    JSONObject j=raw.optJSONObject(i);if(j==null)continue;
-                    Item item=new Item(j);if(item.title.isEmpty())continue;
-                    String id=!item.magnet.isEmpty()?item.magnet:item.title+"|"+item.bytes;
+                if(raw!=null) for(int i=0;i<raw.length();i++){
+                    JSONObject itemJson=raw.optJSONObject(i);
+                    if(itemJson==null)continue;
+                    Item item=new Item(itemJson);
+                    if(item.title.isEmpty())continue;
+                    String id=!item.magnet.isEmpty()?item.magnet:item.title+"|"+item.bytes+"|"+item.tracker;
                     if(seen.add(id))out.add(item);
                 }
-                return out;
-            } finally {c.disconnect();}
+                JSONArray indexers=response.optJSONArray("Indexers");
+                if(indexers==null)indexers=response.optJSONArray("indexers");
+                int ok=0,errors=0,unknown=0;
+                List<String> failed=new ArrayList<>();
+                if(indexers!=null)for(int i=0;i<indexers.length();i++){
+                    JSONObject ind=indexers.optJSONObject(i);
+                    if(ind==null)continue;
+                    int code=ind.optInt("Status",ind.optInt("status",0));
+                    if(code==2)ok++;
+                    else if(code==1){
+                        errors++;
+                        String name=ind.optString("Name",ind.optString("name","Сайт"));
+                        failed.add(name);
+                    }else unknown++;
+                }
+                String warning="";
+                if(indexers!=null && indexers.length()>0){
+                    warning="Сайтов ответило: "+ok+" / "+indexers.length();
+                    if(errors>0) warning+=" · ошибки "+errors+" ("+
+                        android.text.TextUtils.join(", ",failed.subList(0,Math.min(3,failed.size())))+
+                        (errors>3?" …":"")+")";
+                    if(unknown>0)warning+=" · статус неизвестен "+unknown;
+                }else if(indexer.equals("all"))warning="Jackett не прислал состояние отдельных сайтов.";
+                return new SearchReport(out,warning);
+            }finally {c.disconnect();}
         }
     }
     static final class Torr {
