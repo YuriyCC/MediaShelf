@@ -119,7 +119,8 @@ public final class MainActivity extends Activity {
     }
     private void ui() {
         int screenWidthDp=getResources().getConfiguration().screenWidthDp;
-        tvLayout=screenWidthDp>=680;
+        int mode=getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_TYPE_MASK;
+        tvLayout=(mode==android.content.res.Configuration.UI_MODE_TYPE_TELEVISION) || screenWidthDp>=680;
         LinearLayout outer=line();
         outer.setBackgroundColor(BACK);
         outer.setGravity(Gravity.TOP);
