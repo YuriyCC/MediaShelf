@@ -62,6 +62,7 @@ public final class MainActivity extends Activity {
     private String currentCategoryLabel = "";
     private String activeSource = "xxxclub";
     private boolean loadingSources = false;
+    private String sourceListError = "";
     private final ExecutorService worker = Executors.newFixedThreadPool(4);
     private final ExecutorService metadataWorker = Executors.newFixedThreadPool(3);
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -113,6 +114,7 @@ public final class MainActivity extends Activity {
         super.onCreate(saved);
         prefs = getSharedPreferences("local_settings",MODE_PRIVATE);
         activeSource=prefs.getString("indexer","xxxclub");
+        sources.addAll(SourceRegistry.fromCache(prefs.getString("source_cache","[]")));
         ui();
         if (prefs.getString("api_key","").isEmpty()) settings(true);
         else { loadSources(); load("","latest"); }
@@ -247,8 +249,15 @@ public final class MainActivity extends Activity {
         if(sourceSelector!=null)sourceSelector.setText(title+"  ▾");
         if(sourceButtons==null)return;
         sourceButtons.removeAllViews();
-        if(sourceSummary!=null)sourceSummary.setText(sources.isEmpty()
-            ? "Список пока не загружен" : "Источники · "+sources.size());
+        if(sourceSummary!=null)sourceSummary.setText(
+            loadingSources ? "Загрузка сайтов..." :
+            sources.isEmpty() ? "Источники пока не получены" :
+            "Источники · "+sources.size()+(sourceListError.isEmpty()?"":" (кеш)"));
+        if(sources.isEmpty()) {
+            Button first=button("XXXClub");
+            first.setOnClickListener(v->selectSource("xxxclub"));
+            sourceButtons.addView(first,lp(-1,43));
+        }
         for(SourceRegistry.Source src:sources) {
             String text=src.name;
             String previous=probeResults.get(src.id);
@@ -260,12 +269,20 @@ public final class MainActivity extends Activity {
             b.setOnClickListener(v->selectSource(src.id));
             sourceButtons.addView(b,lp(-1,43));
         }
+        Button other=button("+ Выбрать другой сайт");
+        other.setOnClickListener(v->chooseSource());
+        sourceButtons.addView(other,lp(-1,48));
+        Button update=button("Обновить список");
+        update.setOnClickListener(v->loadSources());
+        sourceButtons.addView(update,lp(-1,45));
     }
     private void loadSources() {
         if(loadingSources)return;
         String key=prefs.getString("api_key","");
         if(key.isEmpty())return;
         loadingSources=true;
+        sourceListError="";
+        refreshSourceMenu();
         String address=prefs.getString("jackett_url","http://192.168.50.2:9117");
         worker.execute(()->{
             try {
@@ -273,38 +290,87 @@ public final class MainActivity extends Activity {
                 main.post(()->{
                     if(isFinishing())return;
                     loadingSources=false;
-                    sources.clear();
-                    sources.addAll(found);
+                    if(!found.isEmpty()){
+                        sources.clear();
+                        sources.addAll(found);
+                        prefs.edit().putString("source_cache",SourceRegistry.toCache(found)).apply();
+                    }else{
+                        sourceListError="Jackett вернул пустой список";
+                    }
                     refreshSourceMenu();
-                    if(found.isEmpty())Toast.makeText(this,"Jackett не вернул настроенные источники",Toast.LENGTH_LONG).show();
+                    if(found.isEmpty())Toast.makeText(this,"Jackett не вернул список сайтов. Можно ввести ID вручную.",Toast.LENGTH_LONG).show();
                 });
             }catch(Exception e) {
                 main.post(()->{
                     if(isFinishing())return;
                     loadingSources=false;
+                    sourceListError=error(e);
                     refreshSourceMenu();
-                    Toast.makeText(this,"Список сайтов: "+error(e),Toast.LENGTH_LONG).show();
+                    Toast.makeText(this,"Список сайтов: "+sourceListError+". Доступен ручной выбор.",Toast.LENGTH_LONG).show();
                 });
             }
         });
     }
     private void chooseSource() {
-        if(sources.isEmpty()) {
-            loadSources();
-            new AlertDialog.Builder(this).setTitle("Источники")
-                .setMessage("Список сайтов загружается из Jackett. Сейчас доступны «Все сайты» и сохранённый источник.")
-                .setPositiveButton("Все сайты",(d,w)->selectSource("all"))
-                .setNeutralButton("Текущий сайт",(d,w)->selectSource(activeSource))
-                .setNegativeButton("Закрыть",null).show();
-            return;
+        // The chooser must always work, even when the Jackett indexer-list endpoint
+        // returns HTML, errors or times out.
+        final List<SourceRegistry.Source> available=new ArrayList<>(sources);
+        available.sort(Comparator.comparing(a->a.name.toLowerCase(Locale.ROOT)));
+        List<String> titles=new ArrayList<>();
+        List<String> ids=new ArrayList<>();
+        titles.add("Все сайты — общий поиск"); ids.add("all");
+        boolean hasXXX=false;
+        for(SourceRegistry.Source src:available)if(src.id.equals("xxxclub"))hasXXX=true;
+        if(!hasXXX) {
+            titles.add("XXXClub — проверенный ранее источник");ids.add("xxxclub");
         }
-        String[] choices=new String[sources.size()+1];
-        choices[0]="Все сайты — общий поиск";
-        for(int i=0;i<sources.size();i++)
-            choices[i+1]=sources.get(i).name;
-        new AlertDialog.Builder(this).setTitle("Выбери источник ("+sources.size()+")")
-            .setItems(choices,(d,i)->selectSource(i==0?"all":sources.get(i-1).id))
-            .setNegativeButton("Назад",null).show();
+        for(SourceRegistry.Source src:available) {
+            titles.add(src.name+(src.id.equals(activeSource)?"  ✓":""));
+            ids.add(src.id);
+        }
+        titles.add("Указать сайт по ID вручную"); ids.add("__manual");
+        titles.add(loadingSources?"Список загружается...":"Обновить список из Jackett");
+        ids.add("__refresh");
+        String message=loadingSources?"Идёт загрузка списка Jackett":
+            sourceListError.isEmpty()?"Источники Jackett: "+available.size():
+                "Не удалось загрузить список: "+sourceListError+
+                "\nМожно выбрать известный сайт или указать его ID.";
+        new AlertDialog.Builder(this).setTitle("Выбор сайта").setMessage(message)
+            .setItems(titles.toArray(new String[0]),(d,i)->{
+                String id=ids.get(i);
+                if(id.equals("__manual"))manualSource();
+                else if(id.equals("__refresh")) {
+                    loadSources();
+                    Toast.makeText(this,"Обновляем список сайтов",Toast.LENGTH_SHORT).show();
+                } else selectSource(id);
+            }).setNegativeButton("Закрыть",null).show();
+    }
+    private void manualSource() {
+        EditText field=new EditText(this);
+        field.setSingleLine(true);
+        field.setTextColor(WHITE);
+        field.setHint("например: mypornclub");
+        field.setHintTextColor(MUTED);
+        field.setText(activeSource.equals("all")?"":activeSource);
+        field.setSelectAllOnFocus(true);
+        LinearLayout wrapper=column();
+        wrapper.setPadding(dp(22),0,dp(22),0);
+        wrapper.addView(field);
+        AlertDialog dialog=new AlertDialog.Builder(this)
+            .setTitle("ID индексатора Jackett")
+            .setMessage("Можно выбрать любой настроенный в Jackett сайт. Введи его ID из настроек Jackett. Это не означает, что сайт уже проверен.")
+            .setView(wrapper).setPositiveButton("Выбрать",null)
+            .setNegativeButton("Назад",(d,w)->chooseSource()).create();
+        dialog.setOnShowListener(x->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+            String id=field.getText().toString().trim().toLowerCase(Locale.ROOT);
+            if(!id.matches("[a-z0-9_-]{1,80}")) {
+                field.setError("Нужен ID сайта без пробелов, например xxxclub");
+                return;
+            }
+            dialog.dismiss();
+            selectSource(id);
+        }));
+        dialog.show();
     }
     private void selectSource(String id) {
         if(!id.equals("all") && !id.matches("[a-zA-Z0-9_-]{1,80}"))return;
@@ -314,6 +380,20 @@ public final class MainActivity extends Activity {
         prefs.edit().putString("indexer",id).apply();
         refreshSourceMenu();
         load(lastQuery,lastSort);
+    }
+    private void mergeDiscoveredSources(List<SourceRegistry.Source> observed) {
+        boolean changed=false;
+        for(SourceRegistry.Source item:observed) {
+            if(SourceRegistry.byId(sources,item.id)==null) {
+                sources.add(item);
+                changed=true;
+            }
+        }
+        if(changed){
+            sources.sort(Comparator.comparing(x->x.name.toLowerCase(Locale.ROOT)));
+            prefs.edit().putString("source_cache",SourceRegistry.toCache(sources)).apply();
+            refreshSourceMenu();
+        }
     }
     private void categories() {
         if(activeSource.equals("all")) {
@@ -449,6 +529,8 @@ public final class MainActivity extends Activity {
                 main.post(()->{
                     if(req!=serial || isFinishing())return;
                     show(result);
+                    if(source.equals("all") && !report.discovered.isEmpty())
+                        mergeDiscoveredSources(report.discovered);
                     if(!report.warning.isEmpty()) {
                         TextView warn=label(report.warning,12,0xffffc56a,false);
                         warn.setPadding(0,0,0,dp(10));
@@ -702,8 +784,9 @@ public final class MainActivity extends Activity {
         static final class SearchReport {
             final List<Item> items;
             final String warning;
-            SearchReport(List<Item> items,String warning){
-                this.items=items;this.warning=warning;
+            final List<SourceRegistry.Source> discovered;
+            SearchReport(List<Item> items,String warning,List<SourceRegistry.Source> discovered){
+                this.items=items;this.warning=warning;this.discovered=discovered;
             }
         }
         static SearchReport searchReport(String base,String key,String indexer,
@@ -740,9 +823,15 @@ public final class MainActivity extends Activity {
                 if(indexers==null)indexers=response.optJSONArray("indexers");
                 int ok=0,errors=0,unknown=0;
                 List<String> failed=new ArrayList<>();
+                List<SourceRegistry.Source> discovered=new ArrayList<>();
                 if(indexers!=null)for(int i=0;i<indexers.length();i++){
                     JSONObject ind=indexers.optJSONObject(i);
                     if(ind==null)continue;
+                    String sourceId=ind.optString("ID",ind.optString("id","")).trim();
+                    String sourceName=ind.optString("Name",ind.optString("name",sourceId));
+                    if(sourceId.matches("[a-zA-Z0-9_-]{1,80}") && !sourceId.equals("all"))
+                        discovered.add(new SourceRegistry.Source(sourceId,sourceName,"","",
+                                new ArrayList<SourceRegistry.Category>()));
                     int code=ind.optInt("Status",ind.optInt("status",0));
                     if(code==2)ok++;
                     else if(code==1){
@@ -759,7 +848,7 @@ public final class MainActivity extends Activity {
                         (errors>3?" …":"")+")";
                     if(unknown>0)warning+=" · статус неизвестен "+unknown;
                 }else if(indexer.equals("all"))warning="Jackett не прислал состояние отдельных сайтов.";
-                return new SearchReport(out,warning);
+                return new SearchReport(out,warning,discovered);
             }finally {c.disconnect();}
         }
     }
