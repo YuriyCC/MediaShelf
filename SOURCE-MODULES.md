@@ -55,3 +55,10 @@
 - Подтвержденная причина для XXXClub: подставные скрытые ссылки (left:-9999px) с фальшивыми курсорами и одна рабочая видимая ссылка.
 - Добавлены тесты всех 8 категорий (0..7) и отдельный поиск по слову; группы 720p и 1080p разделены.
 - Полнота живого каталога требует проверки на устройстве. Пока нет доказательств, что количество результатов равно полному индексу сайта.
+
+## TV-first visual release 1.1
+- Design system isolated in `MediaDesign.java`; all native Android layouts, no embedded websites.
+- Main activity: new sidebar, source chips, hero, poster grid, details and navigation focus.
+- Launcher icon `res/drawable/ic_mediashelf.xml`, TV banner `res/drawable/banner_mediashelf.xml`.
+- User requirement: no `test` in visible app name or version; stable package and certificate are preserved; the private key's filename and alias must NOT be changed.
+- TV acceptance: remote navigation across left menu / search / category chips / poster cards, back from details, poster loading, page 2+ in keyword search and categories, play a file on TorrServer.

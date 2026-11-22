@@ -129,3 +129,19 @@ MediaShelf 1.0 introduces `PageNavigation.java` as a **reusable page-navigation 
 Unit regressions (15 cases) now include a snippet reproduced from the real search HTML where six fake hidden links and the actual visible link have the same "Next Page" label, plus **all eight** native XXXClub category paths (0 through 7). HD 720p and 1080p are distinct app-native categories; Jackett's Torznab 6040 had merged them.
 
 `gradle testDebugUnitTest assembleRelease` runs before exporting this unsigned build. These are offline checks, not a live end-to-end claim for every page on the user's device. The site is allowed to change its HTML, in which case the site-specific adapter may need another update.
+
+## MediaShelf 1.1 — TV-first visual design (versionName "1.1", no "-test")
+
+This is the visual/interaction release intended for Android TV testing with XXXClub before adding more native trackers. The application label is **MediaShelf** on TV and phones, and the Android OS version label is **1.1** (no `-test` suffix). Same applicationId `org.mediashelf.tv` and private signing key as versions 0.3–1.0.
+
+Features:
+- Full dark native interface (no WebView), consistent dark-navy/blue palette and new MediaShelf custom vector launcher icon plus Android TV banner.
+- Television-first 240dp side navigation, clear current-site emphasis, site statuses, separate diagnostics and connection settings, adapted phone header and source menu.
+- Dynamic category filter chips for XXXClub's eight native sections, including 720p and 1080p separately; swipeable on phones and D-pad focusable on TV. No hardcoded English search terms pretending to be main categories.
+- Real result posters with controlled gradients, 4K/FULL HD/HD badges and seed counts, animated remote focus, balanced adaptive grid at both TV and phone sizes.
+- Featured hero for latest/popular unfiltered listings, with a prominent detail-card action and an image from the actual tracker when available. No fake titles or promotional images.
+- Dedicated film details dialog, large poster, data facts, description, screenshot gallery, working playback button if the tracker provides torrent/magnet, external site fallback, remote navigation.
+- Bitmap LRU cache limits redundant image requests and memory usage (24 MiB). Grids present 60 at first (and show more), preserve scroll and focus appropriately during pagination.
+- Direct XXXClub search, site cursor pagination and the 15 automated regression tests from 1.0 remain; Jackett is an optional fallback, not required for the first site.
+
+Validation in CI: `gradle testDebugUnitTest assembleRelease`. Actual remote-control behavior, site access, poster quality and TorrServer playback must be verified on a real Android TV. **Do not mark the XXXClub module fully certified until end-to-end testing.**
