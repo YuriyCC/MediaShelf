@@ -63,6 +63,12 @@ public final class MainActivity extends Activity {
     private String activeSource = "xxxclub";
     private boolean loadingSources = false;
     private String sourceListError = "";
+    private final List<Item> catalogItems = new ArrayList<>();
+    private SitePages.Cursor sitePageCursor;
+    private int visibleCount=60;
+    private boolean loadingNextPage=false;
+    private String pageInfo="";
+    private ScrollView catalogScroll;
     private final ExecutorService worker = Executors.newFixedThreadPool(4);
     private final ExecutorService metadataWorker = Executors.newFixedThreadPool(3);
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -225,6 +231,7 @@ public final class MainActivity extends Activity {
         strip.addView(tabs);
         app.addView(strip);
         ScrollView results=new ScrollView(this);
+        catalogScroll=results;
         results.setFillViewport(true);
         cards=column();
         cards.setPadding(0,dp(12),0,dp(28));
@@ -607,7 +614,15 @@ public final class MainActivity extends Activity {
                     result.sort(Comparator.comparing((Item x)->x.date).reversed());
                 main.post(()->{
                     if(req!=serial || isFinishing())return;
-                    show(result);
+                    catalogItems.clear();
+                    catalogItems.addAll(result);
+                    sitePageCursor=SitePages.supported(source)?SitePages.start(q,category):null;
+                    visibleCount=60;
+                    loadingNextPage=false;
+                    pageInfo=source.equals("xxxclub")
+                        ?"Jackett показывает только первую страницу сайта. Для остальных фильмов нажми «Загрузить ещё с XXXClub».":
+                        "Результаты предоставлены Jackett; охват страниц зависит от индексатора.";
+                    show(catalogItems);
                     if(source.equals("all") && !report.discovered.isEmpty())
                         mergeDiscoveredSources(report.discovered);
                     if(!report.warning.isEmpty()) {
@@ -618,9 +633,16 @@ public final class MainActivity extends Activity {
                 });
             }catch(Exception e){
                 main.post(()->{
-                    if(req==serial && !isFinishing())
-                        message("Ошибка поиска в "+friendly+": "+error(e)+
+                    if(req==serial && !isFinishing()) {
+                        catalogItems.clear();
+                        sitePageCursor=SitePages.supported(source)?SitePages.start(q,category):null;
+                        visibleCount=60;
+                        pageInfo="Jackett не предоставил список: "+error(e)+
+                            ". Можно попробовать чтение страниц XXXClub напрямую.";
+                        if(sitePageCursor!=null)show(catalogItems);
+                        else message("Ошибка поиска в "+friendly+": "+error(e)+
                             "\nПроверь подключение к Jackett или переключи источник.");
+                    }
                 });
             }
         });
@@ -633,17 +655,31 @@ public final class MainActivity extends Activity {
         return m;
     }
     private void show(List<Item> items) {
+        int y=catalogScroll==null?0:catalogScroll.getScrollY();
         cards.removeAllViews();
-        if(items.isEmpty()) { message("Результатов нет. Попробуй другой запрос или источник.");return; }
-        TextView count=label("Найдено: "+items.size()+" · изображения показываются, если их передаёт источник",13,MUTED,false);
+        TextView count=label(
+            "Получено: "+items.size()+" · показано: "+Math.min(items.size(),visibleCount)+
+            (sitePageCursor==null?"":" · страницы XXXClub: "+sitePageCursor.pageIndex),
+            13,MUTED,false);
         count.setPadding(0,0,0,dp(12));cards.addView(count);
+        if(!pageInfo.isEmpty()) {
+            TextView note=label(pageInfo,12,MUTED,false);
+            note.setPadding(0,0,0,dp(10));
+            cards.addView(note);
+        }
+        if(items.isEmpty() && sitePageCursor==null) {
+            TextView empty=label("Поиск не вернул результатов. Попробуй другой запрос или источник.",15,MUTED,false);
+            cards.addView(empty);
+            return;
+        }
         int usableDp=getResources().getConfiguration().screenWidthDp-(tvLayout?280:34);
-        int cols=tvLayout ? Math.max(3,Math.min(6,usableDp/200)) : 2;
+        int cols=tvLayout ? Math.max(3,Math.min(6,Math.max(480,usableDp)/200)) : 2;
         int cardW=Math.max(130,(usableDp-(cols-1)*10)/cols);
-
-        GridLayout grid = new GridLayout(this);grid.setColumnCount(cols);
+        GridLayout grid=new GridLayout(this);
+        grid.setColumnCount(cols);
         cards.addView(grid);
-        for(int i=0;i<Math.min(120,items.size());i++) {
+        int limit=Math.min(visibleCount,items.size());
+        for(int i=0;i<limit;i++) {
             Item item=items.get(i);
             LinearLayout tile=column();
             tile.setBackground(panel(PANEL,false));tile.setPadding(dp(6),dp(6),dp(6),dp(8));
@@ -654,11 +690,10 @@ public final class MainActivity extends Activity {
             TextView noCover=label("Обложка не получена",12,MUTED,false);
             noCover.setGravity(Gravity.CENTER);
             cover.addView(noCover,new android.widget.FrameLayout.LayoutParams(-1,-1));
-            ImageView img=new ImageView(this);
-            img.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            ImageView img=new ImageView(this);img.setScaleType(ImageView.ScaleType.CENTER_CROP);
             cover.addView(img,new android.widget.FrameLayout.LayoutParams(-1,-1));
             tile.addView(cover,lp(-1,tvLayout?166:132));
-            loadPoster(img,item,i<18);
+            loadPoster(img,item,i>=limit-25);
             TextView name=label(item.title,13,WHITE,true);
             name.setMaxLines(3);name.setEllipsize(TextUtils.TruncateAt.END);
             name.setPadding(dp(5),dp(7),dp(5),0);
@@ -669,15 +704,92 @@ public final class MainActivity extends Activity {
             tile.setOnClickListener(v->details(item));
             tile.setOnKeyListener((v,key,event)->{
                 if(event.getAction()==android.view.KeyEvent.ACTION_DOWN &&
-                   (key==android.view.KeyEvent.KEYCODE_DPAD_CENTER || key==android.view.KeyEvent.KEYCODE_ENTER)) {
+                    (key==android.view.KeyEvent.KEYCODE_DPAD_CENTER ||
+                     key==android.view.KeyEvent.KEYCODE_ENTER)){
                     details(item);return true;
                 }
                 return false;
             });
-            GridLayout.LayoutParams p=new GridLayout.LayoutParams(GridLayout.spec(i/cols),GridLayout.spec(i%cols));
-            p.width=dp(cardW);p.height=dp(tvLayout?270:232);p.rightMargin=dp(10);p.bottomMargin=dp(10);
+            GridLayout.LayoutParams p=new GridLayout.LayoutParams(
+                GridLayout.spec(i/cols),GridLayout.spec(i%cols));
+            p.width=dp(cardW);p.height=dp(tvLayout?270:232);
+            p.rightMargin=dp(10);p.bottomMargin=dp(10);
             grid.addView(tile,p);
         }
+        if(items.size()>limit){
+            Button reveal=button("Показать ещё "+Math.min(60,items.size()-limit)+" из уже полученных");
+            reveal.setOnClickListener(v->{
+                visibleCount+=60;
+                show(catalogItems);
+            });
+            cards.addView(reveal,lp(-1,52));
+        }
+        if(sitePageCursor!=null){
+            if(!sitePageCursor.finished){
+                Button more=button(loadingNextPage?"Загрузка страницы…":"Загрузить ещё с XXXClub");
+                more.setEnabled(!loadingNextPage);
+                more.setOnClickListener(v->loadNextPage());
+                cards.addView(more,lp(-1,56));
+            }else {
+                TextView end=label("Дальнейшие страницы не обнаружены на сайте. Это не гарантирует, что фильмов больше нет.",12,MUTED,false);
+                cards.addView(end);
+            }
+        }
+        if(catalogScroll!=null)catalogScroll.post(()->catalogScroll.scrollTo(0,y));
+    }
+    private static String catalogKey(Item item){
+        if(item.details!=null && !item.details.isEmpty()){
+            String clean=item.details.replaceFirst("/+$","").toLowerCase(Locale.ROOT);
+            return clean;
+        }
+        return item.title.toLowerCase(Locale.ROOT)+"|"+item.bytes;
+    }
+    private void loadNextPage(){
+        if(loadingNextPage || sitePageCursor==null || sitePageCursor.finished)return;
+        loadingNextPage=true;
+        int job=serial;
+        final SitePages.Cursor cursor=sitePageCursor;
+        final int category=currentCategory;
+        final Set<String> existing=new HashSet<>();
+        for(Item item:catalogItems)existing.add(catalogKey(item));
+        pageInfo="Получаем следующую страницу каталога XXXClub…";
+        show(catalogItems);
+        worker.execute(()->{
+            List<Item> additional=new ArrayList<>();
+            String last="";
+            try {
+                // First site page can duplicate Jackett's one-page output:
+                // walk up to two real pages on this click before reporting no new items.
+                for(int attempt=0;attempt<2 && !cursor.finished;attempt++){
+                    SitePages.Page p=SitePages.next(cursor,category);
+                    last=p.message;
+                    for(Item item:p.items){
+                        if(existing.add(catalogKey(item)))additional.add(item);
+                    }
+                    if(!additional.isEmpty())break;
+                }
+                final String outcome=last;
+                main.post(()->{
+                    if(isFinishing() || job!=serial || sitePageCursor!=cursor)return;
+                    loadingNextPage=false;
+                    catalogItems.addAll(additional);
+                    visibleCount=Math.max(visibleCount,
+                        Math.min(catalogItems.size(),visibleCount+Math.max(30,additional.size())));
+                    pageInfo=outcome+" · новых: "+additional.size()+
+                        (cursor.finished?" · других страниц сайт не показал":"");
+                    show(catalogItems);
+                });
+            }catch(Exception e){
+                String failure=error(e);
+                main.post(()->{
+                    if(isFinishing() || job!=serial || sitePageCursor!=cursor)return;
+                    loadingNextPage=false;
+                    pageInfo="Не удалось получить страницу XXXClub: "+failure+
+                        ". Повтори попытку или проверь страницу в браузере.";
+                    show(catalogItems);
+                });
+            }
+        });
     }
     private static String referer(Item item) {
         try {
@@ -845,7 +957,8 @@ public final class MainActivity extends Activity {
         return out.toString(StandardCharsets.UTF_8.name());
     }
     static final class Item {
-        final String title,tracker,magnet,download,details,date;
+        final String title,tracker,details,date;
+        volatile String magnet,download;
         volatile String poster,description,imageError="";
         volatile boolean detailsFetched=false;
         volatile java.util.List<String> screenshots=java.util.Collections.emptyList();
