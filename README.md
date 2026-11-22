@@ -113,3 +113,19 @@ Bug in 0.8: SitePages.findNext scanned only CSS .pagination, .pager, .next and e
 0.9 searches "Next Page" anchors anywhere in the HTML, along with data-href and onclick handlers, using same-listing cursor URLs, never manufacturing tokens. If no continuation found, it states that this does NOT prove the site's catalog ended. Nine offline regression tests reproduce the user's URL format; CI runs testDebugUnitTest before packaging.
 
 The user-provided link proves the URL scheme, but the live HTML could not be retrieved in the build environment. This is NOT yet a live end-to-end verification of all pages, and there is no claim the full site catalog is indexed. The optional Jackett bridge is unchanged; applicationId and signing certificate remain stable; versionCode 9.
+
+## 1.0 — reusable pagination controller and real XXXClub Next Page filtering
+
+The user confirmed category pagination worked in 0.9 but XXXClub keyword search still stopped at 51 results. A captured, independently saved November 2026 HTML fixture for XXXClub search showed SIX off-screen fake Next Page links to a decoy cursor (CSS `position:absolute; left:-9999px;`) alongside ONE genuine, visible `data-no-instant` Next Page link pointing to a different cursor. The old engine picked the first fake.
+
+MediaShelf 1.0 introduces `PageNavigation.java` as a **reusable page-navigation controller** that every new native source can use with a site-specific URL validator. The controller:
+- excludes hidden/out-of-viewport links (including ancestors with hidden styles);
+- ignores Previous Page links;
+- gives preference to visible "Next Page" buttons and explicit `data-no-instant` navigation metadata;
+- does not guess cursors, avoiding broken/looping categories;
+- keeps XXXClub-specific URL-context checks inside its own `SitePages` adapter rather than making a universal assumption about categories;
+- recognizes real cursor pages in both search and browse sections.
+
+Unit regressions (15 cases) now include a snippet reproduced from the real search HTML where six fake hidden links and the actual visible link have the same "Next Page" label, plus **all eight** native XXXClub category paths (0 through 7). HD 720p and 1080p are distinct app-native categories; Jackett's Torznab 6040 had merged them.
+
+`gradle testDebugUnitTest assembleRelease` runs before exporting this unsigned build. These are offline checks, not a live end-to-end claim for every page on the user's device. The site is allowed to change its HTML, in which case the site-specific adapter may need another update.

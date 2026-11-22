@@ -32,8 +32,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p unsigned-package
-          cp app/build/outputs/apk/release/app-release-unsigned.apk unsigned-package/MediaShelf-0.9-unsigned.apk
-          git archive --format=zip --output=unsigned-package/MediaShelf-0.9-source.zip HEAD
+          cp app/build/outputs/apk/release/app-release-unsigned.apk unsigned-package/MediaShelf-1.0-unsigned.apk
+          git archive --format=zip --output=unsigned-package/MediaShelf-1.0-source.zip HEAD
           cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" unsigned-package/apksigner.jar
           cp "$ANDROID_HOME/build-tools/35.0.0/zipalign" unsigned-package/zipalign
       - uses: actions/upload-artifact@v4

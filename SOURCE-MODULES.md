@@ -49,3 +49,9 @@
 - Verified by user: on XXXClub first page about 51 items and a visible Next Page button pointing to /torrents/search/all/Gangbang/7296816424212307464.
 - 0.9 expands the native adapter to find same-search cursors across the document and interpret Next Page, rather than numeric pages.
 - Offline tests cover the real URL format. Live functionality still requires device verification.
+
+## 1.0 — Универсальный контроллер страниц
+- Кнопки переходов проверяются универсальным компонентом PageNavigation, но каждое расширение сайта определяет допустимые URL.
+- Подтвержденная причина для XXXClub: подставные скрытые ссылки (left:-9999px) с фальшивыми курсорами и одна рабочая видимая ссылка.
+- Добавлены тесты всех 8 категорий (0..7) и отдельный поиск по слову; группы 720p и 1080p разделены.
+- Полнота живого каталога требует проверки на устройстве. Пока нет доказательств, что количество результатов равно полному индексу сайта.
