@@ -377,8 +377,12 @@ public final class MainActivity extends Activity {
                 prefs.getString("api_key",""),source.id,"",0,13000);
             int withPosters=0;
             for(Item item:report.items)if(!item.poster.isEmpty())withPosters++;
-            return "OK: раздач "+report.items.size()+", постеров от Jackett "+withPosters+
-                "\nОписание/кадры требуют отдельного парсера сайта."+
+            if(report.items.isEmpty())
+                return "Сервер ответил, но раздач по пустому запросу нет. "+
+                    "Это не означает, что поиск сайта сломан. Проверь поиск с названием."+
+                    (report.warning.isEmpty()?"":"\n"+report.warning);
+            return "OK: получено раздач "+report.items.size()+", постеров от Jackett "+withPosters+
+                "\nЭто проверка ответа и метаданных, а не гарантии воспроизведения."+
                 (report.warning.isEmpty()?"":"\n"+report.warning);
         }catch(Exception e){return "Ошибка поиска: "+error(e);}
     }
