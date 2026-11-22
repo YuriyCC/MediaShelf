@@ -51,7 +51,17 @@ import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
     private static final int BACK = 0xff10131a, PANEL = 0xff202738, WHITE = 0xfff0f3fa, MUTED = 0xffacb6c9, BLUE = 0xff6699ff;
-    private static final String[] INDEXERS = {"xxxclub","all","mypornclub","xxxtor","0magnet","bigfangroup","freejavtorrent","pornotorrent","sosulki","sukebeinyaasi"};
+    // Source IDs are loaded from Jackett dynamically; "all" is the virtual combined source.
+    private final List<SourceRegistry.Source> sources = new ArrayList<>();
+    private final java.util.Map<String,String> probeResults = new java.util.concurrent.ConcurrentHashMap<>();
+    private LinearLayout sourceButtons;
+    private TextView sourceSummary;
+    private Button sourceSelector;
+    private boolean tvLayout;
+    private int currentCategory = 0;
+    private String currentCategoryLabel = "";
+    private String activeSource = "xxxclub";
+    private boolean loadingSources = false;
     private final ExecutorService worker = Executors.newFixedThreadPool(4);
     private final ExecutorService metadataWorker = Executors.newFixedThreadPool(3);
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -102,55 +112,308 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
         prefs = getSharedPreferences("local_settings",MODE_PRIVATE);
+        activeSource=prefs.getString("indexer","xxxclub");
         ui();
         if (prefs.getString("api_key","").isEmpty()) settings(true);
-        else load("","latest");
+        else { loadSources(); load("","latest"); }
     }
     private void ui() {
-        LinearLayout root = column(); root.setBackgroundColor(BACK);
-        root.setPadding(dp(18),dp(14),dp(18),0); setContentView(root);
-        LinearLayout top = line();
-        TextView title = label("MediaShelf",26,WHITE,true);
-        top.addView(title,new LinearLayout.LayoutParams(0,dp(54),1));
-        Button settingBtn = button("Настройки");
-        settingBtn.setOnClickListener(v -> settings(false));
-        top.addView(settingBtn,lp(130,48)); root.addView(top);
-        status = label("Jackett → TorrServer → плеер",14,MUTED,false);
-        root.addView(status,lp(-1,38));
-        LinearLayout searchRow = line();
-        queryInput = new EditText(this);
-        queryInput.setTextColor(WHITE); queryInput.setHintTextColor(MUTED); queryInput.setSingleLine(true);
-        queryInput.setHint("Поиск фильма или темы"); queryInput.setTextSize(18);
-        queryInput.setBackground(panel(PANEL,false));queryInput.setPadding(dp(12),0,dp(12),0);
+        int screenWidthDp=getResources().getConfiguration().screenWidthDp;
+        tvLayout=screenWidthDp>=680;
+        LinearLayout outer=line();
+        outer.setBackgroundColor(BACK);
+        outer.setGravity(Gravity.TOP);
+        setContentView(outer);
+        if(tvLayout) {
+            LinearLayout sidebar=column();
+            sidebar.setBackgroundColor(0xff151a25);
+            sidebar.setPadding(dp(12),dp(22),dp(12),dp(10));
+            TextView brand=label("MediaShelf",24,WHITE,true);
+            brand.setPadding(dp(6),0,0,dp(17));
+            sidebar.addView(brand);
+            Button all=button("Все сайты");
+            all.setOnClickListener(v->selectSource("all"));
+            sidebar.addView(all,lp(-1,46));
+            sourceSummary=label("Загрузка источников...",12,MUTED,false);
+            sourceSummary.setPadding(dp(7),dp(17),0,dp(8));
+            sidebar.addView(sourceSummary);
+            ScrollView sourceScroll=new ScrollView(this);
+            sourceScroll.setVerticalScrollBarEnabled(false);
+            sourceButtons=column();
+            sourceScroll.addView(sourceButtons);
+            sidebar.addView(sourceScroll,new LinearLayout.LayoutParams(-1,0,1));
+            Button check=button("Диагностика");
+            check.setOnClickListener(v->diagnostics());
+            sidebar.addView(check,lp(-1,44));
+            Button settings=button("Настройки");
+            settings.setOnClickListener(v->settings(false));
+            sidebar.addView(settings,lp(-1,44));
+            outer.addView(sidebar,lp(218,-1));
+        }
+        LinearLayout app=column();
+        app.setPadding(dp(tvLayout?24:14),dp(tvLayout?20:10),dp(tvLayout?24:14),0);
+        outer.addView(app,new LinearLayout.LayoutParams(0,-1,1));
+        LinearLayout header=line();
+        if(!tvLayout) {
+            TextView title=label("MediaShelf",24,WHITE,true);
+            header.addView(title,new LinearLayout.LayoutParams(0,dp(48),1));
+        } else {
+            TextView title=label("Каталог фильмов",26,WHITE,true);
+            header.addView(title,new LinearLayout.LayoutParams(0,dp(54),1));
+        }
+        sourceSelector=button("Источник: "+activeSource);
+        sourceSelector.setOnClickListener(v->chooseSource());
+        header.addView(sourceSelector,lp(tvLayout?220:172,48));
+        if(!tvLayout) {
+            Button options=button("⋮");
+            options.setOnClickListener(v->moreOptions());
+            LinearLayout.LayoutParams op=lp(48,48);op.leftMargin=dp(7);
+            header.addView(options,op);
+        }
+        app.addView(header);
+        status=label("Подключение к Jackett...",14,MUTED,false);
+        app.addView(status,lp(-1,42));
+        LinearLayout searchRow=line();
+        queryInput=new EditText(this);
+        queryInput.setTextColor(WHITE);
+        queryInput.setHintTextColor(MUTED);
+        queryInput.setSingleLine(true);
+        queryInput.setHint("Поиск фильма, темы или студии");
+        queryInput.setTextSize(tvLayout?19:16);
+        queryInput.setBackground(panel(PANEL,false));
+        queryInput.setPadding(dp(12),0,dp(12),0);
         queryInput.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
-        queryInput.setOnEditorActionListener((v,action,event) -> {
-            if(action == EditorInfo.IME_ACTION_SEARCH) {load(queryInput.getText().toString().trim(),"search");return true;}
+        queryInput.setOnEditorActionListener((v,action,event)->{
+            if(action==EditorInfo.IME_ACTION_SEARCH) {
+                currentCategory=0;currentCategoryLabel="";
+                load(queryInput.getText().toString().trim(),"search");
+                return true;
+            }
             return false;
         });
-        searchRow.addView(queryInput,new LinearLayout.LayoutParams(0,dp(48),1));
-        Button go = button("Найти");
-        LinearLayout.LayoutParams gp=lp(98,48);gp.leftMargin=dp(10);
+        searchRow.addView(queryInput,new LinearLayout.LayoutParams(0,dp(50),1));
+        Button go=button("Найти");
+        LinearLayout.LayoutParams gp=lp(tvLayout?112:85,50);
+        gp.leftMargin=dp(10);
         searchRow.addView(go,gp);
-        go.setOnClickListener(v -> load(queryInput.getText().toString().trim(),"search"));
-        root.addView(searchRow);
-        ScrollView strip = new ScrollView(this);
-        LinearLayout controls = line();
-        for (String category : new String[]{"Новинки","Популярное","Gangbang","Double","Fisting"}) {
-            Button b = button(category);
-            LinearLayout.LayoutParams p=lp(-2,44);p.setMargins(0,dp(8),dp(7),dp(8));
-            controls.addView(b,p);
-            b.setOnClickListener(v -> {
-                String q = category.equals("Новинки") || category.equals("Популярное") ? "" : category;
-                String mode = category.equals("Новинки") ? "latest" : category.equals("Популярное") ? "popular" : "search";
-                queryInput.setText(q);load(q,mode);
+        go.setOnClickListener(v->{
+            currentCategory=0;currentCategoryLabel="";
+            load(queryInput.getText().toString().trim(),"search");
+        });
+        app.addView(searchRow);
+        LinearLayout tabs=line();
+        String[] titles={"Новинки","Популярное","Категории сайта","Gangbang","Double","Fisting"};
+        for(String text:titles) {
+            Button button=button(text);
+            LinearLayout.LayoutParams p=lp(-2,44);
+            p.setMargins(0,dp(10),dp(8),dp(10));
+            tabs.addView(button,p);
+            button.setOnClickListener(v->{
+                if(text.equals("Категории сайта")) {categories();return;}
+                currentCategory=0;currentCategoryLabel="";
+                String q=text.equals("Новинки")||text.equals("Популярное")?"":text;
+                String sort=text.equals("Новинки")?"latest":text.equals("Популярное")?"popular":"search";
+                queryInput.setText(q);
+                load(q,sort);
             });
         }
-        android.widget.HorizontalScrollView h = new android.widget.HorizontalScrollView(this);
-        h.setHorizontalScrollBarEnabled(false);h.addView(controls);
-        root.addView(h);
-        ScrollView list = new ScrollView(this);list.setFillViewport(true);
-        cards=column();cards.setPadding(0,dp(10),0,dp(25));
-        list.addView(cards);root.addView(list,new LinearLayout.LayoutParams(-1,0,1));
+        android.widget.HorizontalScrollView strip=new android.widget.HorizontalScrollView(this);
+        strip.setHorizontalScrollBarEnabled(false);
+        strip.addView(tabs);
+        app.addView(strip);
+        ScrollView results=new ScrollView(this);
+        results.setFillViewport(true);
+        cards=column();
+        cards.setPadding(0,dp(12),0,dp(28));
+        results.addView(cards);
+        app.addView(results,new LinearLayout.LayoutParams(-1,0,1));
+        refreshSourceMenu();
+    }
+    private void moreOptions() {
+        String[] choices={"Выбор сайта","Категории сайта","Диагностика источников","Настройки"};
+        new AlertDialog.Builder(this).setTitle("MediaShelf")
+            .setItems(choices,(d,i)->{
+                if(i==0)chooseSource();
+                else if(i==1)categories();
+                else if(i==2)diagnostics();
+                else settings(false);
+            }).show();
+    }
+    private void refreshSourceMenu() {
+        String title=activeSource.equals("all")?"Все сайты":activeSource;
+        SourceRegistry.Source active=SourceRegistry.byId(sources,activeSource);
+        if(active!=null)title=active.name;
+        if(sourceSelector!=null)sourceSelector.setText(title+"  ▾");
+        if(sourceButtons==null)return;
+        sourceButtons.removeAllViews();
+        if(sourceSummary!=null)sourceSummary.setText(sources.isEmpty()
+            ? "Список пока не загружен" : "Источники · "+sources.size());
+        for(SourceRegistry.Source src:sources) {
+            String text=src.name;
+            String previous=probeResults.get(src.id);
+            if(previous!=null)text+=(previous.startsWith("OK")?" ✓":" !");
+            else if(!src.lastError.isEmpty())text+=" · ?";
+            Button b=button(text);
+            b.setTextSize(12);
+            if(activeSource.equals(src.id))b.setTextColor(0xffa8c6ff);
+            b.setOnClickListener(v->selectSource(src.id));
+            sourceButtons.addView(b,lp(-1,43));
+        }
+    }
+    private void loadSources() {
+        if(loadingSources)return;
+        String key=prefs.getString("api_key","");
+        if(key.isEmpty())return;
+        loadingSources=true;
+        String address=prefs.getString("jackett_url","http://192.168.50.2:9117");
+        worker.execute(()->{
+            try {
+                List<SourceRegistry.Source> found=SourceRegistry.fetch(address,key);
+                main.post(()->{
+                    if(isFinishing())return;
+                    loadingSources=false;
+                    sources.clear();
+                    sources.addAll(found);
+                    refreshSourceMenu();
+                    if(found.isEmpty())Toast.makeText(this,"Jackett не вернул настроенные источники",Toast.LENGTH_LONG).show();
+                });
+            }catch(Exception e) {
+                main.post(()->{
+                    if(isFinishing())return;
+                    loadingSources=false;
+                    refreshSourceMenu();
+                    Toast.makeText(this,"Список сайтов: "+error(e),Toast.LENGTH_LONG).show();
+                });
+            }
+        });
+    }
+    private void chooseSource() {
+        if(sources.isEmpty()) {
+            loadSources();
+            new AlertDialog.Builder(this).setTitle("Источники")
+                .setMessage("Список сайтов загружается из Jackett. Сейчас доступны «Все сайты» и сохранённый источник.")
+                .setPositiveButton("Все сайты",(d,w)->selectSource("all"))
+                .setNeutralButton("Текущий сайт",(d,w)->selectSource(activeSource))
+                .setNegativeButton("Закрыть",null).show();
+            return;
+        }
+        String[] choices=new String[sources.size()+1];
+        choices[0]="Все сайты — общий поиск";
+        for(int i=0;i<sources.size();i++)
+            choices[i+1]=sources.get(i).name;
+        new AlertDialog.Builder(this).setTitle("Выбери источник ("+sources.size()+")")
+            .setItems(choices,(d,i)->selectSource(i==0?"all":sources.get(i-1).id))
+            .setNegativeButton("Назад",null).show();
+    }
+    private void selectSource(String id) {
+        if(!id.equals("all") && !id.matches("[a-zA-Z0-9_-]{1,80}"))return;
+        activeSource=id;
+        currentCategory=0;
+        currentCategoryLabel="";
+        prefs.edit().putString("indexer",id).apply();
+        refreshSourceMenu();
+        load(lastQuery,lastSort);
+    }
+    private void categories() {
+        if(activeSource.equals("all")) {
+            new AlertDialog.Builder(this).setTitle("Категории")
+                .setMessage("Категории сайтов отличаются. Выбери конкретный сайт, чтобы видеть его реальные категории из Jackett. Общие тематические запросы доступны над каталогом.")
+                .setPositiveButton("Выбрать сайт",(d,w)->chooseSource())
+                .setNegativeButton("Закрыть",null).show();
+            return;
+        }
+        SourceRegistry.Source src=SourceRegistry.byId(sources,activeSource);
+        if(src==null || src.categories.isEmpty()) {
+            new AlertDialog.Builder(this).setTitle("Категории "+activeSource)
+                .setMessage("Jackett ещё не загрузил категории этого сайта или не предоставил их. Поиск по названию доступен.")
+                .setPositiveButton("Обновить список",(d,w)->loadSources())
+                .setNegativeButton("Закрыть",null).show();
+            return;
+        }
+        List<SourceRegistry.Category> available=new ArrayList<>(src.categories);
+        String[] options=new String[available.size()+1];
+        options[0]="Все категории сайта";
+        for(int i=0;i<available.size();i++)options[i+1]=available.get(i).name;
+        new AlertDialog.Builder(this).setTitle(src.name+" — категории")
+            .setItems(options,(d,i)->{
+                currentCategory=i==0?0:available.get(i-1).id;
+                currentCategoryLabel=i==0?"":available.get(i-1).name;
+                queryInput.setText("");
+                load("","latest");
+            }).setNegativeButton("Закрыть",null).show();
+    }
+    private void diagnostics() {
+        if(sources.isEmpty()) {loadSources();Toast.makeText(this,"Сначала загрузим список Jackett",Toast.LENGTH_SHORT).show();return;}
+        String[] names=new String[sources.size()];
+        for(int i=0;i<sources.size();i++) {
+            SourceRegistry.Source src=sources.get(i);
+            String status=probeResults.get(src.id);
+            if(status==null)status=src.lastError.isEmpty()?"Не проверен":"Ошибка в Jackett (последняя): "+src.lastError;
+            if(status.length()>60)status=status.substring(0,60)+"…";
+            names[i]=src.name+" — "+status;
+        }
+        new AlertDialog.Builder(this).setTitle("Диагностика · "+sources.size()+" сайтов")
+            .setItems(names,(d,i)->probeSource(sources.get(i)))
+            .setPositiveButton("Проверить все",(d,w)->probeAll())
+            .setNegativeButton("Закрыть",null).show();
+    }
+    private void probeSource(SourceRegistry.Source source) {
+        Toast.makeText(this,"Проверяем "+source.name,Toast.LENGTH_SHORT).show();
+        worker.execute(()->{
+            String result=checkSource(source);
+            main.post(()->{
+                if(isFinishing())return;
+                probeResults.put(source.id,result);
+                refreshSourceMenu();
+                new AlertDialog.Builder(this).setTitle(source.name).setMessage(result)
+                    .setPositiveButton("Другие источники",(d,w)->diagnostics()).setNegativeButton("Закрыть",null).show();
+            });
+        });
+    }
+    private String checkSource(SourceRegistry.Source source) {
+        try {
+            Jackett.SearchReport report=Jackett.searchReport(
+                prefs.getString("jackett_url","http://192.168.50.2:9117"),
+                prefs.getString("api_key",""),source.id,"",0,13000);
+            int withPosters=0;
+            for(Item item:report.items)if(!item.poster.isEmpty())withPosters++;
+            return "OK: раздач "+report.items.size()+", постеров от Jackett "+withPosters+
+                "\nОписание/кадры требуют отдельного парсера сайта."+
+                (report.warning.isEmpty()?"":"\n"+report.warning);
+        }catch(Exception e){return "Ошибка поиска: "+error(e);}
+    }
+    private void probeAll() {
+        LinearLayout view=column();
+        view.setPadding(dp(18),dp(18),dp(18),dp(12));
+        TextView progress=label("0 / "+sources.size()+" — проверяем источники",16,WHITE,false);
+        view.addView(progress);
+        TextView detail=label("Результаты появляются по мере проверки.",13,MUTED,false);
+        detail.setPadding(0,dp(14),0,dp(14));
+        view.addView(detail);
+        AlertDialog dlg=new AlertDialog.Builder(this).setTitle("Диагностика всех сайтов")
+            .setView(view).setPositiveButton("Закрыть",null).create();
+        dlg.show();
+        List<SourceRegistry.Source> copy=new ArrayList<>(sources);
+        worker.execute(()->{
+            int n=0,ok=0;
+            for(SourceRegistry.Source src:copy) {
+                if(Thread.currentThread().isInterrupted())break;
+                String outcome=checkSource(src);
+                probeResults.put(src.id,outcome);
+                if(outcome.startsWith("OK"))ok++;
+                int finished=++n,success=ok;
+                main.post(()->{
+                    if(isFinishing())return;
+                    progress.setText(finished+" / "+copy.size()+" · ответили: "+success);
+                    detail.setText(src.name+": "+outcome);
+                    refreshSourceMenu();
+                });
+            }
+            main.post(()->{
+                if(isFinishing())return;
+                detail.setText("Проверка завершена. Открой «Диагностика», чтобы увидеть результат каждого сайта.");
+            });
+        });
     }
     private void message(String m) {
         cards.removeAllViews();
