@@ -522,6 +522,7 @@ public final class MainActivity extends Activity {
         currentCategoryLabel="";
         prefs.edit().putString("indexer",id).apply();
         refreshSourceMenu();
+        updateFilters();
         load(lastQuery,lastSort);
     }
     private void mergeDiscoveredSources(List<SourceRegistry.Source> observed) {
@@ -785,6 +786,8 @@ public final class MainActivity extends Activity {
     private void load(String q,String order) {
         lastQuery=q;
         lastSort=order;
+        focusItemAfterLoad=-1;
+        updateFilters();
         final String source=activeSource;
         final int category=currentCategory;
         final int requestId=++serial;
@@ -1079,10 +1082,7 @@ public final class MainActivity extends Activity {
                         MediaDesign.outlined(this,0xff202f49,0xff3d5b8b,14,1));
                     MediaDesign.animateFocus(more,f);
                 });
-                more.setOnClickListener(v->{
-                    focusItemAfterLoad=catalogItems.size();
-                    loadNextPage();
-                });
+                more.setOnClickListener(v->loadNextPage());
                 cards.addView(more,spaced(-1,57,0,14));
             }else{
                 TextView end=label("Это последняя обнаруженная страница. "+
@@ -1191,6 +1191,7 @@ public final class MainActivity extends Activity {
                 main.post(()->{
                     if(isFinishing() || job!=serial || sitePageCursor!=cursor)return;
                     loadingNextPage=false;
+                    focusItemAfterLoad=additional.isEmpty()?-1:catalogItems.size();
                     catalogItems.addAll(additional);
                     visibleCount=Math.max(visibleCount,
                         Math.min(catalogItems.size(),visibleCount+Math.max(30,additional.size())));
@@ -1241,6 +1242,11 @@ public final class MainActivity extends Activity {
             if(fallBackToDetails && item!=null)refreshMetadata(item,view);
             return;
         }
+        Bitmap cached=pictureCache.get(link);
+        if(cached!=null && !cached.isRecycled()){
+            if(item==null || view.getTag()==item)view.setImageBitmap(cached);
+            return;
+        }
         worker.execute(()->{
             HttpURLConnection c=null;
             try {
@@ -1256,6 +1262,7 @@ public final class MainActivity extends Activity {
                 Bitmap bitmap;
                 try(InputStream in=c.getInputStream()) { bitmap=BitmapFactory.decodeStream(in,null,opts); }
                 if(bitmap==null)throw new IllegalStateException("Неверный формат изображения");
+                pictureCache.put(link,bitmap);
                 if(item!=null)item.imageError="";
                 main.post(()->{if(!isFinishing() && (item==null || view.getTag()==item))view.setImageBitmap(bitmap);});
             }catch(Exception e) {
@@ -1274,45 +1281,141 @@ public final class MainActivity extends Activity {
         } else showDetails(item);
     }
     private void showDetails(Item item) {
-        LinearLayout stack=column();
-        stack.setPadding(dp(16),dp(8),dp(16),dp(15));
-        String info="Источник: "+item.tracker+"\\nРазмер: "+item.size()+"\\nСиды: "+item.seeders+"\\nДата: "+item.date;
-        TextView facts=label(info,14,WHITE,false);stack.addView(facts);
-        TextView description=label(item.description.isEmpty()?"Описание на сайте пока не получено.":item.description,14,MUTED,false);
-        description.setPadding(0,dp(16),0,dp(12));stack.addView(description);
-        if(item.screenshots.size()>0) {
-            TextView header=label("Кадры из фильма",16,WHITE,true);
-            stack.addView(header);
-            android.widget.HorizontalScrollView gallery=new android.widget.HorizontalScrollView(this);
-            LinearLayout row=line();
-            for(String pic:item.screenshots) {
-                ImageView frame=new ImageView(this);
-                frame.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                frame.setBackground(panel(PANEL,false));
-                LinearLayout.LayoutParams p=lp(142,108);
-                p.setMargins(0,dp(8),dp(9),dp(8));
-                row.addView(frame,p);
-                loadImage(frame,pic,referer(item),null,false);
-                frame.setOnClickListener(v->{
+        final int contentWidth=tvLayout?Math.min(910,
+            getResources().getConfiguration().screenWidthDp-80):
+            getResources().getConfiguration().screenWidthDp-22;
+        LinearLayout root=column();
+        root.setPadding(dp(tvLayout?27:17),dp(tvLayout?23:16),
+            dp(tvLayout?27:17),dp(20));
+        root.setBackground(MediaDesign.gradient(this,
+            new int[]{0xff243453,0xff141e30,0xff111827},22));
+        ScrollView scroll=new ScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.addView(root);
+
+        LinearLayout head=line();
+        head.setGravity(Gravity.TOP);
+        ImageView poster=new ImageView(this);
+        poster.setBackground(MediaDesign.gradient(this,
+            new int[]{0xff304567,0xff1a2940},15));
+        poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        poster.setTag(item);
+        poster.setClipToOutline(true);
+        head.addView(poster,spaced(tvLayout?225:112,tvLayout?301:158,17,0));
+        loadPoster(poster,item,false);
+
+        LinearLayout facts=column();
+        facts.addView(eyebrow("КАРТОЧКА РАЗДАЧИ  /  "+
+            item.tracker.toUpperCase(Locale.ROOT)),spaced(-1,22,0,8));
+        TextView title=label(item.title,tvLayout?25:18,
+            MediaDesign.TEXT,true);
+        title.setMaxLines(tvLayout?7:6);
+        title.setEllipsize(TextUtils.TruncateAt.END);
+        facts.addView(title,spaced(-1,-2,0,tvLayout?17:10));
+
+        LinearLayout tags=line();
+        String quality=MediaDesign.quality(item.title);
+        if(!quality.isEmpty())
+            tags.addView(MediaDesign.tag(this,quality,0xffeed9b8,
+                0xff3a3540),spaced(-2,-2,7,0));
+        tags.addView(MediaDesign.tag(this,item.size(),
+            MediaDesign.TEXT,0xff30466b),spaced(-2,-2,7,0));
+        if(item.seeders>0)
+            tags.addView(MediaDesign.tag(this,"● "+item.seeders+" сидов",
+                MediaDesign.SUCCESS,0xff233a3f));
+        facts.addView(tags,spaced(-1,37,0,12));
+
+        TextView origin=label("ИСТОЧНИК  ·  "+item.tracker+"\n"+
+            (item.date.isEmpty()?"":("ДОБАВЛЕНО  ·  "+item.date)),
+            tvLayout?13:11,MediaDesign.MUTED,false);
+        origin.setMaxLines(3);
+        facts.addView(origin,lp(-1,-2));
+        head.addView(facts,new LinearLayout.LayoutParams(0,-2,1));
+        root.addView(head,spaced(-1,-2,0,18));
+
+        View divider=new View(this);
+        divider.setBackgroundColor(0xff3c4b69);
+        root.addView(divider,spaced(-1,1,0,17));
+        root.addView(eyebrow("О РАЗДАЧЕ"),spaced(-1,24,0,3));
+        TextView description=label(
+            item.description.isEmpty()?
+                "Описание не опубликовано или пока не удалось получить его с сайта.":
+                item.description,
+            tvLayout?15:13,0xffd2dcee,false);
+        description.setLineSpacing(dp(4),1.0f);
+        root.addView(description,spaced(-1,-2,0,22));
+
+        if(!item.screenshots.isEmpty()){
+            root.addView(eyebrow("СКРИНШОТЫ"),spaced(-1,31,0,3));
+            android.widget.HorizontalScrollView gallery=
+                new android.widget.HorizontalScrollView(this);
+            gallery.setHorizontalScrollBarEnabled(false);
+            LinearLayout images=line();
+            for(String imageUrl:item.screenshots){
+                ImageView still=new ImageView(this);
+                still.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                still.setBackground(MediaDesign.round(this,0xff233149,12));
+                still.setClipToOutline(true);
+                still.setFocusable(true);
+                images.addView(still,spaced(tvLayout?192:135,tvLayout?118:91,11,9));
+                loadImage(still,imageUrl,referer(item),null,false);
+                still.setOnFocusChangeListener((v,f)->MediaDesign.animateFocus(v,f));
+                still.setOnClickListener(v->{
                     ImageView full=new ImageView(this);
+                    full.setBackgroundColor(MediaDesign.BG);
                     full.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                    loadImage(full,pic,referer(item),null,false);
-                    new AlertDialog.Builder(this).setView(full).setPositiveButton("Закрыть",null).show();
+                    loadImage(full,imageUrl,referer(item),null,false);
+                    AlertDialog preview=new AlertDialog.Builder(this)
+                        .setView(full)
+                        .setPositiveButton("Закрыть",null).create();
+                    preview.show();
+                    if(preview.getWindow()!=null)
+                        preview.getWindow().setLayout(
+                            (int)(getResources().getDisplayMetrics().widthPixels*0.90),
+                            (int)(getResources().getDisplayMetrics().heightPixels*0.80));
                 });
             }
-            gallery.addView(row);
-            stack.addView(gallery);
+            gallery.addView(images);
+            root.addView(gallery,spaced(-1,tvLayout?147:119,0,15));
         }
-        if(!item.imageError.isEmpty()) {
-            TextView diagnostic=label("Диагностика обложки: "+item.imageError,12,MUTED,false);
-            stack.addView(diagnostic);
+
+        LinearLayout actions=line();
+        Button watch=accentButton(item.link().isEmpty()?
+            "Ссылка недоступна":"▶  Смотреть");
+        watch.setEnabled(!item.link().isEmpty());
+        watch.setAlpha(item.link().isEmpty()?0.55f:1f);
+        actions.addView(watch,new LinearLayout.LayoutParams(0,dp(52),1));
+        Button site=button("На сайте  ↗");
+        LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(0,dp(52),1);
+        sp.leftMargin=dp(10);
+        actions.addView(site,sp);
+        root.addView(actions,spaced(-1,55,0,8));
+        Button close=button("Закрыть карточку");
+        root.addView(close,lp(-1,45));
+
+        AlertDialog dlg=new AlertDialog.Builder(this).setView(scroll).create();
+        watch.setOnClickListener(v->{dlg.dismiss();play(item);});
+        site.setEnabled(!item.details.isEmpty());
+        site.setOnClickListener(v->{
+            if(item.details.isEmpty())return;
+            try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(item.details)));}
+            catch(Exception e){
+                Toast.makeText(this,"Не удалось открыть сайт: "+error(e),
+                    Toast.LENGTH_LONG).show();
+            }
+        });
+        close.setOnClickListener(v->dlg.dismiss());
+        dlg.show();
+        if(dlg.getWindow()!=null){
+            dlg.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+            int width=Math.min(dp(contentWidth),
+                (int)(getResources().getDisplayMetrics().widthPixels*0.97));
+            dlg.getWindow().setLayout(width,
+                (int)(getResources().getDisplayMetrics().heightPixels*(tvLayout?0.88f:0.91f)));
         }
-        ScrollView scroll=new ScrollView(this);scroll.addView(stack);
-        AlertDialog.Builder b=new AlertDialog.Builder(this).setTitle(item.title).setView(scroll)
-                .setNegativeButton("Назад",null);
-        if(!item.link().isEmpty())b.setPositiveButton("Смотреть",(d,w)->play(item));
-        if(!item.details.isEmpty())b.setNeutralButton("Страница",(d,w)->startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(item.details))));
-        b.show();
+        if(tvLayout)(watch.isEnabled()?watch:site).post(
+            ()->(watch.isEnabled()?watch:site).requestFocus());
     }
     private void play(Item item) {
         String server=prefs.getString("torr_url","http://127.0.0.1:8090");
