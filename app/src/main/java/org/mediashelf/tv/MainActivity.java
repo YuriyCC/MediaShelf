@@ -473,9 +473,9 @@ public final class MainActivity extends Activity {
         for(SiteCatalog.Site site:SiteCatalog.all()){
             boolean selected=activeSource.equals(site.id);
             Button b=button((site.direct?"●  ":"○  ")+site.title);
-            b.setTextSize(14);
+            b.setTextSize(compactTvPreview?11:14);
             b.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
-            b.setPadding(dp(15),0,0,0);
+            b.setPadding(dp(compactTvPreview?7:15),0,0,0);
             b.setTextColor(selected?MediaDesign.TEXT:
                 site.direct?0xffd6e0f2:0xff8292ae);
             b.setBackground(selected?
@@ -491,20 +491,24 @@ public final class MainActivity extends Activity {
             });
             b.setContentDescription(site.title+", "+site.mode());
             b.setOnClickListener(v->selectSource(site.id));
-            sourceButtons.addView(b,spaced(-1,49,0,5));
+            sourceButtons.addView(b,spaced(-1,
+                compactTvPreview?37:49,0,compactTvPreview?2:5));
         }
         Button all=button("▦  Все подключённые");
         all.setTextSize(13);
         all.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
         all.setPadding(dp(15),0,0,0);
         all.setOnClickListener(v->selectSource("all"));
-        sourceButtons.addView(all,spaced(-1,48,0,5));
+        all.setTextSize(compactTvPreview?11:13);
+        sourceButtons.addView(all,spaced(-1,
+            compactTvPreview?36:48,0,compactTvPreview?2:5));
         Button add=button("+  Управление сайтами");
         add.setTextSize(13);
         add.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
         add.setPadding(dp(15),0,0,0);
         add.setOnClickListener(v->chooseSource());
-        sourceButtons.addView(add,lp(-1,48));
+        add.setTextSize(compactTvPreview?11:13);
+        sourceButtons.addView(add,lp(-1,compactTvPreview?36:48));
         updateFilters();
     }
     private void loadSources() {
@@ -1042,13 +1046,15 @@ public final class MainActivity extends Activity {
             return;
         }
         int screen=getResources().getConfiguration().screenWidthDp;
-        int usable=Math.max(284,screen-(tvLayout?314:48));
+        int usable=Math.max(238,screen-(compactTvPreview?
+            Math.max(144,Math.min(185,screen/4))+38:tvLayout?314:48));
         int spacing=tvLayout?14:10;
         int columns=tvLayout?
-            Math.max(2,Math.min(6,usable/186)):
+            Math.max(2,Math.min(6,usable/(compactTvPreview?167:186))):
             2;
         int cardWidth=Math.max(126,(usable-columns*spacing-4)/columns);
-        int coverHeight=(int)(cardWidth*(tvLayout?1.25f:1.12f));
+        int coverHeight=(int)(cardWidth*
+            (compactTvPreview?1.08f:tvLayout?1.25f:1.12f));
         GridLayout grid=new GridLayout(this);
         grid.setColumnCount(columns);
         grid.setClipChildren(false);
@@ -1198,14 +1204,15 @@ public final class MainActivity extends Activity {
             MediaDesign.animateFocus(hero,focused);
         });
         hero.setOnClickListener(v->details(item));
-        int height=tvLayout?224:170;
+        int height=compactTvPreview?178:tvLayout?224:170;
 
         ImageView art=new ImageView(this);
         art.setScaleType(ImageView.ScaleType.CENTER_CROP);
         art.setTag(item);
         android.widget.FrameLayout.LayoutParams artP=
             new android.widget.FrameLayout.LayoutParams(
-                dp(tvLayout?340:180),-1,Gravity.RIGHT|Gravity.TOP);
+                dp(compactTvPreview?220:tvLayout?340:180),-1,
+                Gravity.RIGHT|Gravity.TOP);
         hero.addView(art,artP);
         if(!item.poster.isEmpty())loadImage(art,item.poster,referer(item),item,true);
         if(SiteDetails.supported(item))refreshMetadata(item,art);
@@ -1216,26 +1223,34 @@ public final class MainActivity extends Activity {
 
         LinearLayout textArea=column();
         textArea.setGravity(Gravity.CENTER_VERTICAL);
-        textArea.setPadding(dp(tvLayout?29:18),dp(13),0,dp(15));
+        textArea.setPadding(dp(compactTvPreview?16:tvLayout?29:18),
+            dp(compactTvPreview?7:13),0,dp(compactTvPreview?7:15));
         TextView up=eyebrow(lastSort.equals("popular")?
             "ИЗ ПОПУЛЯРНОГО":"СЕГОДНЯ В КАТАЛОГЕ");
-        textArea.addView(up,spaced(-1,27,0,8));
-        TextView title=label(item.title,tvLayout?25:18,MediaDesign.TEXT,true);
+        textArea.addView(up,spaced(-1,compactTvPreview?17:27,
+            0,compactTvPreview?2:8));
+        TextView title=label(item.title,compactTvPreview?17:tvLayout?25:18,
+            MediaDesign.TEXT,true);
         title.setMaxLines(3);
         title.setEllipsize(TextUtils.TruncateAt.END);
-        textArea.addView(title,spaced(-1,tvLayout?96:73,0,8));
+        textArea.addView(title,spaced(-1,
+            compactTvPreview?68:tvLayout?96:73,0,compactTvPreview?3:8));
         TextView meta=label(item.size()+"   •   "+item.seeders+
             " раздающих",13,0xffcfdbf5,false);
-        textArea.addView(meta,spaced(-1,24,0,7));
+        textArea.addView(meta,spaced(-1,compactTvPreview?19:24,
+            0,compactTvPreview?3:7));
         TextView more=MediaDesign.tag(this,"ОТКРЫТЬ КАРТОЧКУ  ›",
             Color.WHITE,0xff5c7ec5);
-        LinearLayout.LayoutParams tag=new LinearLayout.LayoutParams(-2,dp(31));
+        LinearLayout.LayoutParams tag=new LinearLayout.LayoutParams(-2,
+            dp(compactTvPreview?26:31));
         textArea.addView(more,tag);
         android.widget.FrameLayout.LayoutParams textP=
             new android.widget.FrameLayout.LayoutParams(
-                dp(tvLayout?410:255),-1,Gravity.LEFT|Gravity.TOP);
+                dp(compactTvPreview?265:tvLayout?410:255),-1,
+                Gravity.LEFT|Gravity.TOP);
         hero.addView(textArea,textP);
-        cards.addView(hero,spaced(-1,height,0,tvLayout?25:22));
+        cards.addView(hero,spaced(-1,height,0,
+            compactTvPreview?12:tvLayout?25:22));
     }
     private static String catalogKey(Item item){
         if(item.details!=null && !item.details.isEmpty()){
