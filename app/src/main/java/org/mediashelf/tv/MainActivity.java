@@ -297,7 +297,7 @@ public final class MainActivity extends Activity {
                         sourceListError="Jackett вернул пустой список";
                     }
                     refreshSourceMenu();
-                    if(found.isEmpty())Toast.makeText(this,"Jackett не вернул список сайтов. Можно ввести ID вручную.",Toast.LENGTH_LONG).show();
+                    // The optional Jackett indexer list does not affect native browsing.
                 });
             }catch(Exception e) {
                 main.post(()->{
@@ -305,8 +305,7 @@ public final class MainActivity extends Activity {
                     loadingSources=false;
                     sourceListError=error(e);
                     refreshSourceMenu();
-                    if(sources.isEmpty())
-                        Toast.makeText(this,"Jackett не вернул список сайтов. Доступен ручной выбор.",Toast.LENGTH_LONG).show();
+                    // Avoid distracting errors when the native source catalog is working.
                 });
             }
         });
@@ -390,6 +389,16 @@ public final class MainActivity extends Activity {
         }
     }
     private void categories() {
+        SiteCatalog.Site selected=SiteCatalog.byId(activeSource);
+        if(selected!=null && !selected.direct &&
+            prefs.getString("api_key","").isEmpty()) {
+            new AlertDialog.Builder(this).setTitle("Разделы · "+selected.title)
+                .setMessage("Собственный модуль сайта ещё не готов. "+
+                    "После его разработки здесь появятся реальные разделы сайта. "+
+                    "Временный просмотр через Jackett требует настройки индексатора.")
+                .setPositiveButton("Закрыть",null).show();
+            return;
+        }
         if(activeSource.equals("all")) {
             new AlertDialog.Builder(this).setTitle("Категории")
                 .setMessage("Категории у сайтов различаются. Сначала выбери один сайт; MediaShelf получит доступные категории именно для него. Общий поиск работает по всем сайтам.")
@@ -443,13 +452,18 @@ public final class MainActivity extends Activity {
         List<String> labels=new ArrayList<>();
         labels.add("Все категории сайта");
         for(SourceRegistry.Category c:list)labels.add(c.name);
-        labels.add("Обновить категории из Jackett");
+        labels.add(adapter?"Категории от прямого модуля сайта":"Обновить категории из Jackett");
         String title=(id.equals("xxxclub")?"XXXClub":id)+" — категории"+
             (adapter?" (адаптер сайта)":"");
         new AlertDialog.Builder(this).setTitle(title)
             .setItems(labels.toArray(new String[0]),(d,pos)->{
                 if(pos==labels.size()-1) {
-                    fetchSiteCategories(id);
+                    if(adapter) {
+                        new AlertDialog.Builder(this).setTitle("Категории")
+                            .setMessage("Этот список взят из адаптера сайта, а не из Jackett. "+
+                                "Обновление категорий будет частью отдельного модуля.")
+                            .setPositiveButton("Закрыть",null).show();
+                    }else fetchSiteCategories(id);
                     return;
                 }
                 currentCategory=pos==0?0:list.get(pos-1).id;
@@ -459,19 +473,58 @@ public final class MainActivity extends Activity {
             }).setNegativeButton("Назад",null).show();
     }
     private void diagnostics() {
-        if(sources.isEmpty()) {loadSources();Toast.makeText(this,"Сначала загрузим список Jackett",Toast.LENGTH_SHORT).show();return;}
-        String[] names=new String[sources.size()];
-        for(int i=0;i<sources.size();i++) {
-            SourceRegistry.Source src=sources.get(i);
-            String status=probeResults.get(src.id);
-            if(status==null)status=src.lastError.isEmpty()?"Не проверен":"Ошибка в Jackett (последняя): "+src.lastError;
-            if(status.length()>60)status=status.substring(0,60)+"…";
-            names[i]=src.name+" — "+status;
+        final List<String> titles=new ArrayList<>();
+        final List<String> ids=new ArrayList<>();
+        for(SiteCatalog.Site site:SiteCatalog.all()) {
+            titles.add(site.title+" · "+(site.direct?"прямой модуль":"через Jackett"));
+            ids.add(site.id);
         }
-        new AlertDialog.Builder(this).setTitle("Диагностика · "+sources.size()+" сайтов")
-            .setItems(names,(d,i)->probeSource(sources.get(i)))
-            .setPositiveButton("Проверить все",(d,w)->probeAll())
+        new AlertDialog.Builder(this).setTitle("Проверка модулей")
+            .setMessage("Выбери конкретный сайт. Диагностика проверяет поиск, категории "+
+                "и доступность постера; остальные функции тестируются отдельно.")
+            .setPositiveButton("Проверить прямой XXXClub",(d,w)->probeNativeXxxclub())
             .setNegativeButton("Закрыть",null).show();
+        // A separate site chooser is used because AlertDialog setMessage and
+        // setItems together hides the list on some Android builds.
+        new AlertDialog.Builder(this).setTitle("Источники для диагностики")
+            .setItems(titles.toArray(new String[0]),(d,i)->{
+                String id=ids.get(i);
+                if(id.equals("xxxclub"))probeNativeXxxclub();
+                else probeSource(new SourceRegistry.Source(id,
+                    SiteCatalog.byId(id).title,SiteCatalog.byId(id).address,
+                    "",new ArrayList<SourceRegistry.Category>()));
+            }).setNegativeButton("Закрыть",null).show();
+    }
+    private void probeNativeXxxclub() {
+        Toast.makeText(this,"Проверка XXXClub без Jackett",Toast.LENGTH_SHORT).show();
+        worker.execute(()->{
+            String outcome;
+            try {
+                NativeSource source=NativeSources.get("xxxclub");
+                SitePages.Cursor cursor=source.begin("",0);
+                SitePages.Page first=source.fetchNext(cursor,0);
+                StringBuilder report=new StringBuilder();
+                report.append("Прямое подключение: работает\n")
+                    .append("Раздач на первой странице: ").append(first.items.size())
+                    .append("\nКатегорий адаптера: ").append(source.categories().size())
+                    .append("\nСайт показал следующую страницу: ")
+                    .append(first.more?"да":"не удалось найти")
+                    .append("\nЭто не проверка всего каталога.");
+                if(!first.items.isEmpty()){
+                    Item one=first.items.get(0);
+                    if(one.poster.isEmpty())source.enrich(one);
+                    report.append("\nПроверка постера: ")
+                        .append(SiteDetails.verifyImage(one.poster,referer(one)));
+                }
+                outcome=report.toString();
+            }catch(Exception e){outcome="Прямой модуль недоступен: "+error(e);}
+            String result=outcome;
+            main.post(()->{
+                if(isFinishing())return;
+                new AlertDialog.Builder(this).setTitle("XXXClub · диагностика")
+                    .setMessage(result).setPositiveButton("Закрыть",null).show();
+            });
+        });
     }
     private void probeSource(SourceRegistry.Source source) {
         Toast.makeText(this,"Проверяем "+source.name,Toast.LENGTH_SHORT).show();
@@ -966,10 +1019,10 @@ public final class MainActivity extends Activity {
     private void settings(boolean first) {
         LinearLayout root=column();
         root.setPadding(dp(18),dp(10),dp(18),dp(10));
-        EditText jackett=field(root,"Jackett",prefs.getString("jackett_url","http://192.168.50.2:9117"),false);
-        EditText key=field(root,"Jackett API key",prefs.getString("api_key",""),true);
+        EditText jackett=field(root,"Резервный Jackett (необязательно)",prefs.getString("jackett_url","http://192.168.50.2:9117"),false);
+        EditText key=field(root,"API-ключ Jackett (необязательно)",prefs.getString("api_key",""),true);
         EditText torr=field(root,"TorrServer",prefs.getString("torr_url","http://127.0.0.1:8090"),false);
-        TextView selected=label("Выбранный источник: "+activeSource+"\nВыбор сайтов и категории находятся на главном экране. Список сайтов загружается автоматически из Jackett.",13,MUTED,false);
+        TextView selected=label("XXXClub подключается напрямую. Jackett необязателен и используется только для источников, у которых ещё нет собственного модуля. \nУчётные данные сайтов не нужно вводить в MediaShelf до появления безопасного модуля входа.",13,MUTED,false);
         selected.setPadding(0,dp(15),0,dp(10));
         root.addView(selected);
         ScrollView scroll=new ScrollView(this);scroll.addView(root);
@@ -979,7 +1032,7 @@ public final class MainActivity extends Activity {
                     .putString("api_key",key.getText().toString().trim())
                     .putString("torr_url",torr.getText().toString().trim())
                     .putString("indexer",activeSource).apply();
-                loadSources();
+                if(!key.getText().toString().trim().isEmpty())loadSources();
                 load(lastQuery,lastSort);
             });
         if(!first)b.setNegativeButton("Отмена",null);
