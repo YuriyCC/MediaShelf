@@ -153,3 +153,21 @@ Validation in CI: `gradle testDebugUnitTest assembleRelease`. Actual remote-cont
 На небольшом горизонтальном экране предпросмотр автоматически уменьшает боковое меню, заголовки, поиск, фильтры, баннер и высоту постеров. На реальном Android TV этот телефонный режим не появляется и телевизионная разметка 1.1 остаётся прежней. Версия приложения называется `1.2`, без `-test`. Пакет и сертификат подписи прежние. После смены ориентации восстанавливаются слова поиска, сортировка и выбранная категория; выдача обновляется.
 
 Проверка: `gradle testDebugUnitTest assembleRelease`, затем ручная проверка горизонтального телефона. Предпросмотр не заменяет отдельную проверку реальным пультом.
+
+## MediaShelf 1.3 — design iteration toward the approved TV mockup
+
+The user compared a cinematic purple TV catalog mockup with MediaShelf 1.2 on a landscape phone and reported that the implemented interface looked significantly weaker. This iteration makes concrete improvements rather than showing another concept image.
+
+Changes:
+- Brand palette moves from muted blue to a deep navy/indigo and vivid violet accent, including the TV app icon/banner, sidebar focus, selected categories and action buttons.
+- TV preview on a phone is immersive (hides status/navigation bars when preview is active; TV hardware is unchanged), retains an always available explicit `Режим телефона` exit button in the sidebar.
+- Removes duplicated large title and status row in compact TV preview (still present on real TV). Search and category chips sit at the top like the design concept.
+- Sidebar occupies ~20% of the logical phone width, with the catalog having priority.
+- Shows the actual **featured hero with real tracker poster** at the top of latest/popular category views; resets list scrolling after a new query so the hero is not skipped due to stale ScrollView offset or focus.
+- Compact-TV preview shows 4–6 thumbnails per row instead of three large portrait cards. TV hardware poster layout and normal portrait-phone layout remain unchanged.
+- Shaves padding, headings and info labels in the small horizontal preview. Full site status and diagnostics are still available in the real TV layout and site diagnostics.
+- Existing source modules, XXXClub pagination, TorrServer settings, signed package ID and TV/phone toggle logic remain intact.
+
+Caution: The mockup used stylized scenic placeholder images. The actual application must display each tracker’s real image and release name, not fabricated content. Consequently the appearance can be brought close in spacing/color/composition, but the footage and artwork will differ.
+
+Build checks: CI must run `testDebugUnitTest assembleRelease`. UI layout and focus behavior are still to be verified from real-device screenshots before being considered final.

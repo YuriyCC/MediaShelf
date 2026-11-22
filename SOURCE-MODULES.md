@@ -68,3 +68,9 @@
 - В режиме ТВ на телефоне можно выйти в обычную компоновку кнопкой `Режим телефона`.
 - Компоненты масштабируются под горизонтальный экран телефона без выдачи имитации за реальное телевизионное разрешение.
 - Поиск XXXClub, выбор разделов, постеры и переходы по страницам не меняются.
+
+## 1.3 design iteration
+- Screenshot feedback: 1.2 compact-TV preview was overloaded by duplicate top headings, had only 3 overlarge posters per row and showed the hero below the visible scroll area.
+- Changed theme to purple/indigo, immersive preview, smaller 4–6 poster grid and top-of-catalog reset.
+- Direct source and pager implementation unaffected.
+- Real site images remain real source images; scenic placeholders in design mockup are NOT shipped as fake content.
