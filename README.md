@@ -82,3 +82,24 @@ MediaShelf 0.7 introduces `app/src/main/java/org/mediashelf/tv/SitePages.java`:
 - **Source of truth** for APK signing: use the same private signing key/fingerprint as 0.3–0.6; applicationId stays `org.mediashelf.tv`, versionCode 7. Never commit the key to the public GitHub repo.
 
 The direct website may block or change its HTML, so runtime validation on the user's device is still required. This change deliberately keeps Jackett as the initial search fallback until direct pagination proves reliable.
+
+## 0.8 — native-first module architecture
+
+The long-term product is a **single TV-first Android APK** with a curated adult-only tracker library, **one independently tested module per tracker**, a consistent catalog/search/film-detail UI, and optional TorrServer playback. The user prefers to finish the first useful curated set of modules before installing broadly. This release is a development milestone, not the finished site catalog.
+
+Implemented in this commit:
+- `SiteCatalog.java`: curated adult-only site registry with truthful per-site implementation status. XXXClub has a direct adapter; PornoLab, MyPornClub, torrent-pirat and XXXTor are listed as planned modules and temporarily rely on Jackett.
+- `NativeSource.java`: explicit native module contract with separate discovery, category support, search/page cursor, detail poster/torrent enrichment; `XxxClubSource` implementation.
+- **XXXClub searches directly from the Android app, no Jackett API key or Home Assistant required**. Direct HTML request has a fallback to Jackett only when optional bridge settings are present and the direct request fails.
+- "Все подключённые" initially searches the only available native adapter, XXXClub, until additional native site modules have been developed. It MUST NOT claim to search unavailable/unimplemented sites.
+- Java UI source selection and TV side menu show a curated adult-only list rather than 32 arbitrary indexers. Unimplemented direct modules are labelled honestly. Source-specific categories and diagnostics; no forced Jackett credential dialog at launch.
+- Small dark-theme refinements, focus border, corrected first-25 poster detail prefetch, adaptive mobile/TV layout retained.
+- Existing signed APK package and fixed signing cert are preserved; versionCode=8.
+
+### Current limitations and acceptance test
+- XXXClub pagination is still **not verified complete**: on the user's device the older module found 51 search results and could not find a next link. No code should claim it is full-site search until this is resolved with actual pagination markup.
+- Native login sessions for private trackers are **not yet implemented**; never ask users to paste passwords into public GitHub or conversation. Jackett may remain an optional bridge.
+- Visual design is an early native implementation and will be further refined in the finalized product.
+- Some sites return thumbnails rather than portrait posters and require dedicated detail parsers, not generic assumptions.
+- No adult torrent indexer list is considered endorsed solely because it appears in the registry: reliability, moderation, quality of releases and live access must be checked independently.
+- Each module must pass live search (query+category), full pagination, image, details, torrent URL and playback tests, plus a negative test when the site is unavailable. Tested per site, not inferred from Jackett discovery.
