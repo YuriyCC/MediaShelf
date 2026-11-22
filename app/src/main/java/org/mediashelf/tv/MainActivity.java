@@ -306,7 +306,8 @@ public final class MainActivity extends Activity {
                     loadingSources=false;
                     sourceListError=error(e);
                     refreshSourceMenu();
-                    Toast.makeText(this,"Список сайтов: "+sourceListError+". Доступен ручной выбор.",Toast.LENGTH_LONG).show();
+                    if(sources.isEmpty())
+                        Toast.makeText(this,"Jackett не вернул список сайтов. Доступен ручной выбор.",Toast.LENGTH_LONG).show();
                 });
             }
         });
@@ -404,30 +405,71 @@ public final class MainActivity extends Activity {
     private void categories() {
         if(activeSource.equals("all")) {
             new AlertDialog.Builder(this).setTitle("Категории")
-                .setMessage("Категории сайтов отличаются. Выбери конкретный сайт, чтобы видеть его реальные категории из Jackett. Общие тематические запросы доступны над каталогом.")
+                .setMessage("Категории у сайтов различаются. Сначала выбери один сайт; MediaShelf получит доступные категории именно для него. Общий поиск работает по всем сайтам.")
                 .setPositiveButton("Выбрать сайт",(d,w)->chooseSource())
                 .setNegativeButton("Закрыть",null).show();
             return;
         }
-        SourceRegistry.Source src=SourceRegistry.byId(sources,activeSource);
-        if(src==null || src.categories.isEmpty()) {
-            new AlertDialog.Builder(this).setTitle("Категории "+activeSource)
-                .setMessage("Jackett ещё не загрузил категории этого сайта или не предоставил их. Поиск по названию доступен.")
-                .setPositiveButton("Обновить список",(d,w)->loadSources())
-                .setNegativeButton("Закрыть",null).show();
+        String id=activeSource;
+        List<SourceRegistry.Category> fallback=IndexerCapabilities.known(id);
+        if(!fallback.isEmpty()) {
+            showCategoryDialog(id,fallback,true);
             return;
         }
-        List<SourceRegistry.Category> available=new ArrayList<>(src.categories);
-        String[] options=new String[available.size()+1];
-        options[0]="Все категории сайта";
-        for(int i=0;i<available.size();i++)options[i+1]=available.get(i).name;
-        new AlertDialog.Builder(this).setTitle(src.name+" — категории")
-            .setItems(options,(d,i)->{
-                currentCategory=i==0?0:available.get(i-1).id;
-                currentCategoryLabel=i==0?"":available.get(i-1).name;
+        SourceRegistry.Source src=SourceRegistry.byId(sources,id);
+        if(src!=null && !src.categories.isEmpty()) {
+            showCategoryDialog(id,new ArrayList<>(src.categories),false);
+            return;
+        }
+        fetchSiteCategories(id);
+    }
+    private void fetchSiteCategories(String id) {
+        Toast.makeText(this,"Получаем категории "+id+"...",Toast.LENGTH_SHORT).show();
+        final String base=prefs.getString("jackett_url","http://192.168.50.2:9117");
+        final String key=prefs.getString("api_key","");
+        worker.execute(()->{
+            try {
+                List<SourceRegistry.Category> cats=IndexerCapabilities.fetch(base,key,id);
+                main.post(()->{
+                    if(isFinishing()||!activeSource.equals(id))return;
+                    if(cats.isEmpty()) {
+                        new AlertDialog.Builder(this).setTitle("Категории "+id)
+                            .setMessage("Сайт отвечает, но Jackett не объявил отдельных категорий. Это не значит, что на самом сайте их нет: для него потребуется отдельный модуль каталога.")
+                            .setPositiveButton("Закрыть",null).show();
+                        return;
+                    }
+                    showCategoryDialog(id,cats,false);
+                });
+            }catch(Exception e){
+                main.post(()->{
+                    if(isFinishing()||!activeSource.equals(id))return;
+                    new AlertDialog.Builder(this).setTitle("Категории "+id)
+                        .setMessage("Категории не получены напрямую от индексатора Jackett: "+error(e)+
+                            "\n\nПоиск сайта остаётся доступен. Для его собственных разделов нужен отдельный модуль.")
+                        .setPositiveButton("Закрыть",null).show();
+                });
+            }
+        });
+    }
+    private void showCategoryDialog(String id,List<SourceRegistry.Category> categories,boolean adapter) {
+        List<SourceRegistry.Category> list=new ArrayList<>(categories);
+        List<String> labels=new ArrayList<>();
+        labels.add("Все категории сайта");
+        for(SourceRegistry.Category c:list)labels.add(c.name);
+        labels.add("Обновить категории из Jackett");
+        String title=(id.equals("xxxclub")?"XXXClub":id)+" — категории"+
+            (adapter?" (адаптер сайта)":"");
+        new AlertDialog.Builder(this).setTitle(title)
+            .setItems(labels.toArray(new String[0]),(d,pos)->{
+                if(pos==labels.size()-1) {
+                    fetchSiteCategories(id);
+                    return;
+                }
+                currentCategory=pos==0?0:list.get(pos-1).id;
+                currentCategoryLabel=pos==0?"":list.get(pos-1).name;
                 queryInput.setText("");
                 load("","latest");
-            }).setNegativeButton("Закрыть",null).show();
+            }).setNegativeButton("Назад",null).show();
     }
     private void diagnostics() {
         if(sources.isEmpty()) {loadSources();Toast.makeText(this,"Сначала загрузим список Jackett",Toast.LENGTH_SHORT).show();return;}
@@ -458,20 +500,51 @@ public final class MainActivity extends Activity {
         });
     }
     private String checkSource(SourceRegistry.Source source) {
+        String base=prefs.getString("jackett_url","http://192.168.50.2:9117");
+        String key=prefs.getString("api_key","");
+        StringBuilder reportText=new StringBuilder();
+        List<SourceRegistry.Category> cats=IndexerCapabilities.known(source.id);
+        if(!cats.isEmpty())reportText.append("Категории: ").append(cats.size())
+            .append(" (адаптер сайта)\n");
+        else {
+            try {
+                cats=IndexerCapabilities.fetch(base,key,source.id);
+                reportText.append("Категории Jackett: ").append(cats.size()).append('\n');
+            }catch(Exception e){
+                reportText.append("Категории: ошибка ").append(error(e)).append('\n');
+            }
+        }
         try {
-            Jackett.SearchReport report=Jackett.searchReport(
-                prefs.getString("jackett_url","http://192.168.50.2:9117"),
-                prefs.getString("api_key",""),source.id,"",0,13000);
-            int withPosters=0;
-            for(Item item:report.items)if(!item.poster.isEmpty())withPosters++;
-            if(report.items.isEmpty())
-                return "Сервер ответил, но раздач по пустому запросу нет. "+
-                    "Это не означает, что поиск сайта сломан. Проверь поиск с названием."+
-                    (report.warning.isEmpty()?"":"\n"+report.warning);
-            return "OK: получено раздач "+report.items.size()+", постеров от Jackett "+withPosters+
-                "\nЭто проверка ответа и метаданных, а не гарантии воспроизведения."+
-                (report.warning.isEmpty()?"":"\n"+report.warning);
-        }catch(Exception e){return "Ошибка поиска: "+error(e);}
+            Jackett.SearchReport report=Jackett.searchReport(base,key,source.id,"",0,13000);
+            int posterCount=0, adapted=0;
+            for(Item item:report.items){
+                if(!item.poster.isEmpty())posterCount++;
+                if(SiteDetails.supported(item))adapted++;
+            }
+            reportText.append("Раздач: ").append(report.items.size())
+                .append(" · ссылок на обложки: ").append(posterCount).append('\n');
+            if(report.items.isEmpty()){
+                reportText.append("По пустому запросу раздач нет; это ещё не доказывает сбой поиска.");
+                return "Проверено (без раздач)\n"+reportText;
+            }
+            Item candidate=null;
+            for(Item item:report.items)if(!item.poster.isEmpty()){candidate=item;break;}
+            if(candidate==null)for(Item item:report.items)
+                if(SiteDetails.supported(item)){candidate=item;break;}
+            if(candidate!=null && candidate.poster.isEmpty() && SiteDetails.supported(candidate))
+                SiteDetails.enrich(candidate);
+            if(candidate!=null && !candidate.poster.isEmpty()){
+                String imageResult=SiteDetails.verifyImage(candidate.poster,referer(candidate));
+                reportText.append("Проверка изображения: ").append(imageResult).append('\n');
+            }else {
+                reportText.append("Обложка: Jackett не передал, адаптер пока не нашёл.\n");
+            }
+            reportText.append("Поддержка страниц: ").append(adapted>0?"есть":"пока нет");
+            if(!report.warning.isEmpty())reportText.append("\n").append(report.warning);
+            return "OK: поиск отвечает\n"+reportText;
+        }catch(Exception e){
+            return "Ошибка поиска: "+error(e)+"\n"+reportText;
+        }
     }
     private void probeAll() {
         LinearLayout view=column();
@@ -610,8 +683,10 @@ public final class MainActivity extends Activity {
     }
     private void loadPoster(ImageView view, Item item, boolean prefetch) {
         view.setTag(item);
-        if(!item.poster.isEmpty()) loadImage(view,item.poster,referer(item),item,true);
-        else if(prefetch) refreshMetadata(item,view);
+        // Show Jackett's thumbnail quickly when present. Then replace it with the
+        // actual poster from a site adapter (XXXClub, torrent-pirat, MyPornClub).
+        if(!item.poster.isEmpty())loadImage(view,item.poster,referer(item),item,true);
+        if(prefetch && SiteDetails.supported(item))refreshMetadata(item,view);
     }
     private void refreshMetadata(Item item, ImageView image) {
         if(!SiteDetails.supported(item) || item.detailsFetched) return;
