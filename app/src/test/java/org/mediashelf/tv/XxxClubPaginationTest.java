@@ -66,4 +66,63 @@ public class XxxClubPaginationTest {
         String html="<script>var next='/torrents/search/all/Gangbang/7296816424212307464';</script>";
         assertEquals(SECOND,next(html));
     }
+    /**
+     * This replicates a captured search page (November 2026): six off-screen
+     * fake "Next Page" anchors and one actual visible data-no-instant anchor.
+     * The fake and real links have different opaque cursor values.
+     */
+    @Test public void searchSkipsSixHiddenBaitLinksAndUsesRealNextPage(){
+        String fake="/torrents/search/all/Gangbang/839183183190101";
+        StringBuilder html=new StringBuilder("<div class='browsepagination'>");
+        for(int i=0;i<3;i++){
+            html.append("<a class='page-link' href='").append(fake)
+                .append("' title='Next Page' style='position:absolute; left:-9999px;'>Next Page</a>");
+        }
+        html.append("<a href='/torrents/search/all/Gangbang/7296816424212307464' ")
+            .append("title='Next Page' data-no-instant>Next Page</a>");
+        for(int i=0;i<3;i++){
+            html.append("<a class='page-link' href='").append(fake)
+                .append("' title='Next Page' style='position:absolute; left:-9999px;'>Next Page</a>");
+        }
+        html.append("</div>");
+        assertEquals(SECOND,next(html.toString()));
+    }
+    @Test public void hiddenNextPageIsNotARealNextPage(){
+        String html="<a href='"+SECOND+"' title='Next Page' style='left:-9999px;position:absolute'>Next Page</a>";
+        assertNull(next(html));
+    }
+    @Test public void visibleLinkPreferredOverHiddenEvenIfHiddenFirst(){
+        String html="<div class='browsepagination'>"+
+            "<a href='/torrents/search/all/Gangbang/839183183190101' "+
+            "style='position:absolute;left:-99999px' title='Next Page'>Next Page</a>"+
+            "<a href='"+SECOND+"' title='Next Page' data-no-instant>Next Page</a>"+
+            "</div>";
+        assertEquals(SECOND,next(html));
+    }
+    @Test public void categoryCursorWorksForAllEightNativeSections(){
+        final int[] nativeCodes={0,1,2,3,4,5,6,7};
+        for(int code:nativeCodes){
+            String first="https://xxxclub.to/torrents/browse/"+code;
+            String second=first+"/7296816424212307464";
+            String bait=first+"/839183183190101";
+            String html="<div class='browsepagination'>"+
+                "<a title='Next Page' style='left:-9999px' href='"+bait+"'>Next Page</a>"+
+                "<a data-no-instant title='Next Page' href='"+second+"'>Next Page</a>"+
+                "</div>";
+            assertEquals("category code "+code,second,
+                SitePages.findNext(Jsoup.parse(html,first),first,new HashSet<>(),1));
+        }
+    }
+    @Test public void nativeCategoryIdsCoverTheEightDistinctSiteSections(){
+        int[] ids={6080,10001,10002,6090,6045,6060,6070,6050};
+        for(int nativeId=0;nativeId<ids.length;nativeId++){
+            assertEquals("site category "+nativeId,nativeId,
+                SitePages.nativeCategory(ids[nativeId]));
+        }
+    }
+    @Test public void searchPaginationRejectsOtherQueryCursors(){
+        String html="<a href='/torrents/search/all/Different/7296816424212307464' title='Next Page'>Next Page</a>";
+        assertNull(next(html));
+    }
+
 }
