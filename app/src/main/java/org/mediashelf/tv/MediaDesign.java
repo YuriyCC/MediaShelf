@@ -13,14 +13,14 @@ import android.widget.TextView;
  * Android framework only: no WebView, launcher frameworks or remote assets.
  */
 final class MediaDesign {
-    static final int BG=0xff0b101b;
-    static final int SIDEBAR=0xff111928;
-    static final int SURFACE=0xff1b2538;
-    static final int SURFACE_UP=0xff253450;
+    static final int BG=0xff080e1b;
+    static final int SIDEBAR=0xff0d1425;
+    static final int SURFACE=0xff172136;
+    static final int SURFACE_UP=0xff243048;
     static final int TEXT=0xfff5f7ff;
-    static final int MUTED=0xff9eaec8;
-    static final int ACCENT=0xff8caaff;
-    static final int ACCENT_LIGHT=0xffb5c9ff;
+    static final int MUTED=0xffa4b2cf;
+    static final int ACCENT=0xffba70ff;
+    static final int ACCENT_LIGHT=0xffddacff;
     static final int GOLD=0xffefc28b;
     static final int SUCCESS=0xff83d5b4;
 
