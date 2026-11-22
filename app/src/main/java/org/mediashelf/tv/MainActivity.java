@@ -649,9 +649,15 @@ public final class MainActivity extends Activity {
             tile.setBackground(panel(PANEL,false));tile.setPadding(dp(6),dp(6),dp(6),dp(8));
             tile.setClickable(true);tile.setFocusable(true);
             tile.setOnFocusChangeListener((v,f)->v.setBackground(panel(f?0xff34415c:PANEL,f)));
-            ImageView img=new ImageView(this);img.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            img.setBackground(panel(0xff34425e,false));
-            tile.addView(img,lp(-1,tvLayout?166:132));
+            android.widget.FrameLayout cover=new android.widget.FrameLayout(this);
+            cover.setBackground(panel(0xff34425e,false));
+            TextView noCover=label("Обложка не получена",12,MUTED,false);
+            noCover.setGravity(Gravity.CENTER);
+            cover.addView(noCover,new android.widget.FrameLayout.LayoutParams(-1,-1));
+            ImageView img=new ImageView(this);
+            img.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            cover.addView(img,new android.widget.FrameLayout.LayoutParams(-1,-1));
+            tile.addView(cover,lp(-1,tvLayout?166:132));
             loadPoster(img,item,i<18);
             TextView name=label(item.title,13,WHITE,true);
             name.setMaxLines(3);name.setEllipsize(TextUtils.TruncateAt.END);
