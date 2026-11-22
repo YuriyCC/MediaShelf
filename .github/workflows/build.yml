@@ -1,10 +1,10 @@
-name: MediaShelf APK (prototype)
+name: MediaShelf public source compilation check
 on:
   push:
     branches: [main]
   workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
 jobs:
   android:
     runs-on: ubuntu-latest
@@ -27,28 +27,5 @@ jobs:
           gradle-version: '8.9'
       - name: Build APK
         run: gradle --no-daemon --stacktrace assembleDebug
-      - uses: actions/upload-artifact@v4
-        with:
-          name: MediaShelf-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 14
-      - name: Publish downloadable test APK
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          cp app/build/outputs/apk/debug/app-debug.apk MediaShelf-0.2-test.apk
-          if gh release view v0.2-test >/dev/null 2>&1; then
-            gh release upload v0.2-test MediaShelf-0.2-test.apk --clobber
-          else
-            gh release create v0.2-test MediaShelf-0.2-test.apk --title "MediaShelf 0.2 — posters and descriptions" --notes "Тестовая Android TV сборка. Введите адрес Jackett, API ключ и адрес TorrServer в настройках приложения. Не протестировано на реальном телевизоре." --prerelease
-          fi
-      - name: Package exact source snapshot
-        run: git archive --format=zip --output=MediaShelf-source.zip HEAD
-      - name: Upload source snapshot
-        uses: actions/upload-artifact@v4
-        with:
-          name: MediaShelf-source
-          path: MediaShelf-source.zip
-          if-no-files-found: error
-          retention-days: 14
+      - name: Note about signing
+        run: echo "Source compilation only. Signed APK is built using a private signing key, not by this public job."
