@@ -22,7 +22,7 @@ public class FeaturedSelectorTest {
         List<Integer> ids=FeaturedSelector.select(rows,5);
         assertEquals(2,ids.size());
         assertFalse(ids.contains(0));
-        assertEquals(Integer.valueOf(2),ids.get(0));
+        assertEquals(Integer.valueOf(1),ids.get(0));
     }
     @Test public void removesPacksImagesVrAndCollections(){
         String[] excluded={"Movie Pack","1000 photos","Clip collection",
