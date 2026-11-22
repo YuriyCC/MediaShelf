@@ -62,20 +62,20 @@ final class SourceRegistry {
             List<Source> sources=new ArrayList<>();
             for (int i=0;i<arr.length();i++) {
                 JSONObject o=arr.optJSONObject(i);
-                if(o==null || !o.optBoolean("configured",false)) continue;
-                String id=o.optString("id","").trim();
+                if(o==null || (o.has("configured") && !o.optBoolean("configured",false))) continue;
+                String id=o.optString("id",o.optString("ID","")).trim();
                 if(!id.matches("[a-zA-Z0-9_-]{1,80}") || id.equals("all")) continue;
-                String name=o.optString("name",id);
-                String site=o.optString("site_link","");
-                String error=o.optString("last_error","");
+                String name=o.optString("name",o.optString("Name",id));
+                String site=o.optString("site_link",o.optString("siteLink",""));
+                String error=o.optString("last_error",o.optString("lastError",""));
                 List<Category> categories=new ArrayList<>();
                 JSONArray caps=o.optJSONArray("caps");
                 if(caps!=null) for(int j=0;j<caps.length();j++) {
                     JSONObject c=caps.optJSONObject(j);
                     if(c==null)continue;
                     try {
-                        int cat=Integer.parseInt(c.optString("ID",""));
-                        if(cat>0 && cat<100000) categories.add(new Category(cat,c.optString("Name","Категория "+cat)));
+                        int cat=Integer.parseInt(c.optString("ID",c.optString("id","")));
+                        if(cat>0 && cat<100000) categories.add(new Category(cat,c.optString("Name",c.optString("name","Категория "+cat))));
                     }catch(NumberFormatException ignored){}
                 }
                 sources.add(new Source(id,name,site,error,categories));
@@ -87,6 +87,46 @@ final class SourceRegistry {
         }
     }
 
+
+    /** Cache is a convenience, never evidence a provider is currently reachable. */
+    static String toCache(List<Source> list) {
+        JSONArray arr=new JSONArray();
+        for (Source s:list) {
+            JSONObject obj=new JSONObject();
+            try {
+                obj.put("id",s.id).put("name",s.name)
+                   .put("site_link",s.siteUrl).put("last_error",s.lastError);
+                JSONArray cats=new JSONArray();
+                for(Category c:s.categories) cats.put(new JSONObject().put("ID",c.id).put("Name",c.name));
+                obj.put("caps",cats);
+                arr.put(obj);
+            } catch(org.json.JSONException ignored){}
+        }
+        return arr.toString();
+    }
+    static List<Source> fromCache(String json) {
+        List<Source> list=new ArrayList<>();
+        try {
+            JSONArray arr=new JSONArray(json);
+            for(int i=0;i<arr.length();i++) {
+                JSONObject o=arr.optJSONObject(i);
+                if(o==null)continue;
+                String id=o.optString("id","");
+                if(!id.matches("[a-zA-Z0-9_-]{1,80}") || id.equals("all"))continue;
+                List<Category> caps=new ArrayList<>();
+                JSONArray c=o.optJSONArray("caps");
+                if(c!=null)for(int j=0;j<c.length();j++) {
+                    JSONObject el=c.optJSONObject(j);
+                    if(el==null)continue;
+                    int number=el.optInt("ID",0);
+                    if(number>0)caps.add(new Category(number,el.optString("Name","Категория "+number)));
+                }
+                list.add(new Source(id,o.optString("name",id),
+                        o.optString("site_link",""),o.optString("last_error",""),caps));
+            }
+        } catch(Exception ignored){}
+        return list;
+    }
     static Source byId(List<Source> list,String id) {
         for(Source s:list)if(s.id.equals(id))return s;
         return null;
