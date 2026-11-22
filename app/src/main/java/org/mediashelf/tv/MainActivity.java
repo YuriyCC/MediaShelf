@@ -603,6 +603,7 @@ public final class MainActivity extends Activity {
         String friendly=source.equals("all")?"Все сайты":named!=null?named.name:source;
         status.setText((order.equals("latest")?"Новинки":order.equals("popular")?"Популярное":"Поиск: "+q)+
             " · "+friendly+(category>0?" · "+currentCategoryLabel:""));
+        if(catalogScroll!=null)catalogScroll.scrollTo(0,0);
         message("Ищем раздачи...");
         worker.execute(()->{
             try {
