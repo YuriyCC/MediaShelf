@@ -134,42 +134,122 @@ final class SitePages {
         cursor.url=next;
         cursor.finished=next==null;
         String message="XXXClub · страница "+cursor.pageIndex+": "+results.size()+" раздач";
-        if(cursor.finished)message+=". Следующая страница не найдена.";
+        if(cursor.finished)message+=". Ссылка Next Page не обнаружена — это НЕ означает, что каталог закончился.";
         return new Page(results,message,cursor.pageIndex,!cursor.finished);
     }
-    private static String findNext(Document d,String current,Set<String> visited,int pageIndex){
-        Element direct=d.selectFirst("a[rel~=next][href],li.next a[href],a.next[href],a[aria-label*=Next][href]");
-        if(direct!=null){
-            String url=direct.attr("abs:href");
-            if(safeUrl(url)&&!visited.contains(url))return url;
-        }
-        Elements pager=d.select("div.pagination a[href],ul.pagination a[href],nav.pagination a[href],"+
-                ".pagination a[href],.pagenavi a[href],.pager a[href],"+
-                ".paging a[href],div.pages a[href],.page-links a[href]");
-        // Only anchors actually marked by the website as pagination links.
-        // This intentionally does not derive page=2 or /2 without evidence.
-        List<Element> options=new ArrayList<>(pager);
-        for(Element a:options){
-            String label=a.text().trim().toLowerCase(Locale.ROOT);
-            if(label.equals("next")||label.equals("next »")||label.equals("следующая")||
-               label.equals("»")||label.equals("›")||label.equals(">>")){
-                String url=a.attr("abs:href");
-                if(safeUrl(url)&&!visited.contains(url))return url;
+    /**
+     * XXXClub uses an opaque cursor, not page numbers:
+     * /torrents/search/all/Gangbang/7296816424212307464.
+     *
+     * A user-verified "Next Page" button may appear OUTSIDE .pagination.
+     * Search every page-navigation anchor/button, then check same-listing
+     * numeric cursor links. Never guess or manufacture a cursor.
+     */
+    static String findNext(Document d,String current,Set<String> visited,int pageIndex){
+        List<String> cursorLinks=new ArrayList<>();
+        for(Element el:d.select("a[href],a[onclick],button[onclick],button[data-href],"+
+                "button[data-url],input[onclick],input[data-href],input[data-url]")) {
+            String next=extractLink(el,d.baseUri());
+            if(!sameListing(current,next) || visited.contains(next) || sameUrl(next,current))
+                continue;
+            String label=(el.text()+" "+el.attr("title")+" "+el.attr("aria-label")+
+                " "+el.attr("rel")+" "+el.className()+" "+el.attr("value"))
+                .toLowerCase(Locale.ROOT).replaceAll("\\s+"," ").trim();
+            boolean nextButton=label.contains("next page") ||
+                label.matches(".*\\bnext\\b.*") ||
+                label.contains("следующ") ||
+                label.contains("дальше") ||
+                label.contains("далее") ||
+                label.contains("›") || label.contains("»") ||
+                label.contains("→");
+            boolean previous=label.contains("prev") ||
+                label.contains("previous") || label.contains("назад") ||
+                label.contains("предыдущ");
+            if(nextButton && !previous)return next;
+            if(previous)continue;
+            if(hasOpaqueCursor(next)) {
+                if(!cursorLinks.contains(next))cursorLinks.add(next);
             }
         }
-        int bestNumber=Integer.MAX_VALUE;
-        String best=null;
-        for(Element a:options){
-            String label=a.text().trim();
-            int target=parseInt(label);
-            if(target>pageIndex && target<bestNumber) {
-                String url=a.attr("abs:href");
-                if(safeUrl(url)&&!visited.contains(url)){
-                    bestNumber=target;best=url;
+        // Some templates render an unlabelled next-cursor anchor without
+        // pagination classes; it is safe only if exactly ONE new cursor exists.
+        if(cursorLinks.size()==1)return cursorLinks.get(0);
+
+        // Last resort: a site template can put the Next Page URL into a script,
+        // rather than a visible anchor. Only accept a single URL with the
+        // current search/browse prefix and a long, opaque numeric cursor.
+        if(cursorLinks.isEmpty()){
+            try {
+                String currentPath=new URI(current).getPath();
+                String base=listingPath(currentPath);
+                java.util.regex.Pattern pattern=java.util.regex.Pattern.compile(
+                    java.util.regex.Pattern.quote(base+"/")+"[0-9]{8,25}");
+                java.util.regex.Matcher matches=pattern.matcher(d.html().replace("\\/","/"));
+                List<String> found=new ArrayList<>();
+                String host=new URI(current).getHost();
+                while(matches.find()){
+                    String u="https://"+host+matches.group();
+                    if(sameListing(current,u) && !visited.contains(u) &&
+                        !sameUrl(current,u) && !found.contains(u))found.add(u);
                 }
+                if(found.size()==1)return found.get(0);
+            }catch(Exception ignored){}
+        }
+        return null;
+    }
+
+    private static String extractLink(Element el,String base){
+        // Plain href (including relative site URLs) is the preferred source.
+        for(String key:new String[]{"abs:href","abs:data-href","abs:data-url",
+                                     "href","data-href","data-url"}){
+            String value=el.attr(key).trim();
+            String link=resolveLink(value,base);
+            if(safeUrl(link))return link;
+        }
+        // Explicit navigation in onclick e.g. location.href='/torrents/...'.
+        String js=el.attr("onclick");
+        if(!js.isEmpty()){
+            java.util.regex.Matcher m=java.util.regex.Pattern.compile(
+                "['\\\"](https?://[^'\\\"]+/torrents/[^'\\\"]+|/torrents/[^'\\\"]+)['\\\"]")
+                .matcher(js);
+            while(m.find()){
+                String link=resolveLink(m.group(1),base);
+                if(safeUrl(link))return link;
             }
         }
-        return best;
+        return "";
+    }
+    private static String resolveLink(String raw,String base){
+        if(raw==null||raw.isEmpty() || raw.startsWith("#") ||
+            raw.startsWith("javascript:"))return "";
+        try{
+            return new URI(base).resolve(raw.replace("&amp;","&")).toString();
+        }catch(Exception ignored){return "";}
+    }
+    private static boolean sameUrl(String a,String b){
+        return a.equals(b) || a.replaceFirst("/+$","").equals(b.replaceFirst("/+$",""));
+    }
+    private static boolean sameListing(String previous,String candidate){
+        if(!safeUrl(candidate))return false;
+        try {
+            URI before=new URI(previous),after=new URI(candidate);
+            String left=listingPath(before.getPath());
+            String right=listingPath(after.getPath());
+            return left.equals(right) && !right.isEmpty() &&
+                after.getPath().startsWith("/torrents/") &&
+                // For this site, a later page must have a cursor (or an
+                // explicit changed query), never another category's URL.
+                (!sameUrl(previous,candidate)) &&
+                (hasOpaqueCursor(candidate) || after.getRawQuery()!=null);
+        }catch(Exception e){return false;}
+    }
+    private static String listingPath(String path){
+        if(path==null)return "";
+        return path.replaceFirst("/[0-9]{8,25}/?$","").replaceFirst("/+$","");
+    }
+    private static boolean hasOpaqueCursor(String url){
+        try{return new URI(url).getPath().matches(".*/[0-9]{8,25}/?");}
+        catch(Exception ignored){return false;}
     }
     private static boolean safeUrl(String url){
         try{
