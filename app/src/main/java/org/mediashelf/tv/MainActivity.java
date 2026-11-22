@@ -50,7 +50,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
-    private static final int BACK = 0xff10131a, PANEL = 0xff202738, WHITE = 0xfff0f3fa, MUTED = 0xffacb6c9, BLUE = 0xff6699ff;
+    private static final int BACK = 0xff0e121c, PANEL = 0xff202b40, WHITE = 0xfff0f3fa, MUTED = 0xffa6b4cc, BLUE = 0xff81aaff;
     // Source IDs are loaded from Jackett dynamically; "all" is the virtual combined source.
     private final List<SourceRegistry.Source> sources = new ArrayList<>();
     private final java.util.Map<String,String> probeResults = new java.util.concurrent.ConcurrentHashMap<>();
@@ -83,7 +83,7 @@ public final class MainActivity extends Activity {
     private int dp(float value) { return (int)(getResources().getDisplayMetrics().density * value + 0.5f); }
     private GradientDrawable panel(int bg, boolean focus) {
         GradientDrawable d = new GradientDrawable();
-        d.setColor(bg); d.setCornerRadius(dp(11));
+        d.setColor(bg); d.setCornerRadius(dp(16));
         if (focus) d.setStroke(dp(2), BLUE);
         return d;
     }
@@ -187,7 +187,7 @@ public final class MainActivity extends Activity {
         queryInput.setTextColor(WHITE);
         queryInput.setHintTextColor(MUTED);
         queryInput.setSingleLine(true);
-        queryInput.setHint("Поиск фильма, темы или студии");
+        queryInput.setHint("Название, студия или тема…");
         queryInput.setTextSize(tvLayout?19:16);
         queryInput.setBackground(panel(PANEL,false));
         queryInput.setPadding(dp(12),0,dp(12),0);
@@ -211,14 +211,14 @@ public final class MainActivity extends Activity {
         });
         app.addView(searchRow);
         LinearLayout tabs=line();
-        String[] titles={"Новинки","Популярное","Категории сайта","Gangbang","Double","Fisting"};
+        String[] titles={"Новинки","Популярное","Разделы сайта","Gangbang","Double","Fisting"};
         for(String text:titles) {
             Button button=button(text);
             LinearLayout.LayoutParams p=lp(-2,44);
             p.setMargins(0,dp(10),dp(8),dp(10));
             tabs.addView(button,p);
             button.setOnClickListener(v->{
-                if(text.equals("Категории сайта")) {categories();return;}
+                if(text.equals("Разделы сайта")) {categories();return;}
                 currentCategory=0;currentCategoryLabel="";
                 String q=text.equals("Новинки")||text.equals("Популярное")?"":text;
                 String sort=text.equals("Новинки")?"latest":text.equals("Популярное")?"popular":"search";
@@ -479,13 +479,7 @@ public final class MainActivity extends Activity {
             titles.add(site.title+" · "+(site.direct?"прямой модуль":"через Jackett"));
             ids.add(site.id);
         }
-        new AlertDialog.Builder(this).setTitle("Проверка модулей")
-            .setMessage("Выбери конкретный сайт. Диагностика проверяет поиск, категории "+
-                "и доступность постера; остальные функции тестируются отдельно.")
-            .setPositiveButton("Проверить прямой XXXClub",(d,w)->probeNativeXxxclub())
-            .setNegativeButton("Закрыть",null).show();
-        // A separate site chooser is used because AlertDialog setMessage and
-        // setItems together hides the list on some Android builds.
+        // Android AlertDialog does not reliably combine message + item list.
         new AlertDialog.Builder(this).setTitle("Источники для диагностики")
             .setItems(titles.toArray(new String[0]),(d,i)->{
                 String id=ids.get(i);
@@ -782,7 +776,7 @@ public final class MainActivity extends Activity {
             ImageView img=new ImageView(this);img.setScaleType(ImageView.ScaleType.CENTER_CROP);
             cover.addView(img,new android.widget.FrameLayout.LayoutParams(-1,-1));
             tile.addView(cover,lp(-1,tvLayout?166:132));
-            loadPoster(img,item,i>=limit-25);
+            loadPoster(img,item,i<25);
             TextView name=label(item.title,13,WHITE,true);
             name.setMaxLines(3);name.setEllipsize(TextUtils.TruncateAt.END);
             name.setPadding(dp(5),dp(7),dp(5),0);
