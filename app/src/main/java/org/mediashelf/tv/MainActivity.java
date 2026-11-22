@@ -173,6 +173,96 @@ public final class MainActivity extends Activity {
     private int focusItemAfterLoad=-1;
     private boolean resetCatalogScroll=false;
 
+    // Homepage is an editorial carousel driven by actual items in XXXClub's
+    // native Movies category, rather than an arbitrary first torrent.
+    private final List<Item> featuredItems=new ArrayList<>();
+    private boolean featuredLoading=false;
+    private int featuredIndex=0;
+    private android.widget.FrameLayout featuredHost;
+    private ImageView featuredPoster;
+    private TextView featuredTitle,featuredMeta,featuredDots,featuredEyebrow;
+    private LinearLayout featuredControls;
+    private boolean carouselActive=false;
+    private final Runnable carouselAdvance=new Runnable(){
+        @Override public void run(){
+            if(!carouselActive || featuredHost==null ||
+                featuredHost.getParent()==null || featuredItems.size()<2)return;
+            if(!featuredHost.hasFocus())advanceCarousel(1);
+            scheduleCarousel();
+        }
+    };
+
+    private boolean isHomepage(){
+        return currentCategory==0 && lastQuery.trim().isEmpty() &&
+            (lastSort.equals("latest")||lastSort.equals("popular")) &&
+            (activeSource.equals("xxxclub")||activeSource.equals("all"));
+    }
+    private void scheduleCarousel(){
+        main.removeCallbacks(carouselAdvance);
+        if(carouselActive && featuredHost!=null &&
+            featuredHost.getParent()!=null && featuredItems.size()>1){
+            main.postDelayed(carouselAdvance,7500L);
+        }
+    }
+    @Override protected void onResume(){
+        super.onResume();
+        carouselActive=true;
+        scheduleCarousel();
+    }
+    @Override protected void onPause(){
+        carouselActive=false;
+        main.removeCallbacks(carouselAdvance);
+        super.onPause();
+    }
+    private void advanceCarousel(int delta){
+        if(featuredItems.size()<2)return;
+        featuredIndex=(featuredIndex+delta+featuredItems.size())%featuredItems.size();
+        renderCarouselSlide();
+        scheduleCarousel();
+    }
+    private void fetchFeaturedFilms(int requestId){
+        if(!isHomepage())return;
+        worker.execute(()->{
+            List<Item> accepted=new ArrayList<>();
+            try{
+                // Native category 3 = single full-length movies / DVD / WEB.
+                // This is a separate query; "MegaPACK" and other site packs
+                // from the general latest feed will not become feature items.
+                SitePages.Cursor cursor=SitePages.start("",6090);
+                List<Item> found=new ArrayList<>();
+                for(int page=0;page<3 && !cursor.finished;page++){
+                    SitePages.Page one=SitePages.next(cursor,6090);
+                    found.addAll(one.items);
+                    if(selectFeaturedFilms(found).size()>=4)break;
+                }
+                accepted.addAll(selectFeaturedFilms(found));
+            }catch(Exception ignored){
+                // Preserve the normal catalog if curation cannot be fetched.
+                // Never replace the results with a random pack.
+            }
+            main.post(()->{
+                if(isFinishing() || requestId!=serial || !isHomepage())return;
+                featuredItems.clear();
+                featuredItems.addAll(accepted);
+                featuredIndex=0;
+                featuredLoading=false;
+                renderCarouselSlide();
+            });
+        });
+    }
+    private static List<Item> selectFeaturedFilms(List<Item> films){
+        List<FeaturedSelector.Candidate> scored=new ArrayList<>();
+        for(Item item:films){
+            scored.add(new FeaturedSelector.Candidate(
+                item.title,item.poster,item.details,item.seeders));
+        }
+        List<Item> result=new ArrayList<>();
+        for(int index:FeaturedSelector.select(scored,5))
+            result.add(films.get(index));
+        return result;
+    }
+
+
     private TextView eyebrow(String value){
         TextView t=label(value,11,MediaDesign.ACCENT_LIGHT,true);
         t.setLetterSpacing(0.14f);
@@ -890,6 +980,11 @@ public final class MainActivity extends Activity {
         status.setText(section+" · "+friendly+
             (category>0?" · "+currentCategoryLabel:""));
         catalogItems.clear();sitePageCursor=null;loadingNextPage=false;visibleCount=60;
+        main.removeCallbacks(carouselAdvance);
+        featuredHost=null;
+        featuredItems.clear();
+        featuredIndex=0;
+        featuredLoading=isHomepage();
         pageInfo="";
         resetCatalogScroll=true;
         message("Идёт поиск…");
@@ -916,6 +1011,7 @@ public final class MainActivity extends Activity {
                             :"Прямой каталог XXXClub · без Jackett. ")+
                             first.message+" · полнота каталога зависит от страниц сайта";
                         show(catalogItems);
+                        fetchFeaturedFilms(requestId);
                     });
                 }catch(Exception directError) {
                     if(api.isEmpty()) {
@@ -1001,11 +1097,12 @@ public final class MainActivity extends Activity {
             catalogScroll==null?0:catalogScroll.getScrollY();
         boolean resetThisDraw=resetCatalogScroll;
         resetCatalogScroll=false;
+        main.removeCallbacks(carouselAdvance);
         cards.removeAllViews();
+        featuredHost=null;
 
-        if(!items.isEmpty() && lastQuery.isEmpty() &&
-            (lastSort.equals("latest")||lastSort.equals("popular")))
-            addFeaturedHero(items.get(0));
+        if(!items.isEmpty() && isHomepage())
+            addFeaturedCarousel();
 
         LinearLayout heading=line();
         LinearLayout left=column();
@@ -1203,70 +1300,145 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void addFeaturedHero(Item item){
-        android.widget.FrameLayout hero=new android.widget.FrameLayout(this);
+    private void addFeaturedCarousel(){
+        final android.widget.FrameLayout hero=new android.widget.FrameLayout(this);
+        featuredHost=hero;
         hero.setBackground(MediaDesign.horizontal(this,
-            new int[]{0xff35215d,0xff231940,0xff15132d},22));
+            new int[]{0xff3b1c6d,0xff261741,0xff13132b},20));
         hero.setClipToOutline(true);
         hero.setFocusable(true);
         hero.setClickable(true);
-        hero.setOnFocusChangeListener((v,focused)->{
-            hero.setBackground(focused?
-                MediaDesign.outlined(this,0xff294975,MediaDesign.ACCENT,22,2):
+        hero.setContentDescription("Рекомендованные фильмы, карусель");
+        hero.setOnFocusChangeListener((v,f)->{
+            hero.setBackground(f?
+                MediaDesign.outlined(this,0xff42226f,MediaDesign.ACCENT,20,2):
                 MediaDesign.horizontal(this,
-                    new int[]{0xff35215d,0xff231940,0xff15132d},22));
-            MediaDesign.animateFocus(hero,focused);
+                    new int[]{0xff3b1c6d,0xff261741,0xff13132b},20));
+            MediaDesign.animateFocus(hero,f);
         });
-        hero.setOnClickListener(v->details(item));
-        int height=compactTvPreview?117:tvLayout?224:170;
+        hero.setOnClickListener(v->{
+            if(!featuredItems.isEmpty())
+                details(featuredItems.get(featuredIndex));
+        });
 
-        ImageView art=new ImageView(this);
-        art.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        art.setTag(item);
-        android.widget.FrameLayout.LayoutParams artP=
+        int height=compactTvPreview?130:tvLayout?228:185;
+        featuredPoster=new ImageView(this);
+        featuredPoster.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        android.widget.FrameLayout.LayoutParams artParams=
             new android.widget.FrameLayout.LayoutParams(
-                dp(compactTvPreview?175:tvLayout?340:180),-1,
+                dp(compactTvPreview?195:tvLayout?400:180),-1,
                 Gravity.RIGHT|Gravity.TOP);
-        hero.addView(art,artP);
-        if(!item.poster.isEmpty())loadImage(art,item.poster,referer(item),item,true);
-        if(SiteDetails.supported(item))refreshMetadata(item,art);
-        View fade=new View(this);
-        fade.setBackground(MediaDesign.horizontal(this,
-            new int[]{0xff35215d,0xee35215d,0x5535215d,0x0035215d},22));
-        hero.addView(fade,new android.widget.FrameLayout.LayoutParams(-1,-1));
+        hero.addView(featuredPoster,artParams);
+        View tint=new View(this);
+        tint.setBackground(MediaDesign.horizontal(this,
+            new int[]{0xff3b1c6d,0xee352057,0x882b1b4a,0x00221a36},20));
+        hero.addView(tint,new android.widget.FrameLayout.LayoutParams(-1,-1));
 
-        LinearLayout textArea=column();
-        textArea.setGravity(Gravity.CENTER_VERTICAL);
-        textArea.setPadding(dp(compactTvPreview?16:tvLayout?29:18),
-            dp(compactTvPreview?4:13),0,dp(compactTvPreview?4:15));
-        TextView up=eyebrow(lastSort.equals("popular")?
-            "ПОПУЛЯРНОЕ СЕГОДНЯ":"НОВЫЕ ФИЛЬМЫ В КАТАЛОГЕ");
-        textArea.addView(up,spaced(-1,compactTvPreview?14:27,
-            0,compactTvPreview?1:8));
-        TextView title=label(item.title,compactTvPreview?15:tvLayout?25:18,
+        LinearLayout copy=column();
+        copy.setGravity(Gravity.CENTER_VERTICAL);
+        copy.setPadding(dp(compactTvPreview?12:tvLayout?30:17),
+            dp(compactTvPreview?8:14),dp(3),dp(compactTvPreview?11:17));
+        featuredEyebrow=eyebrow("ФИЛЬМЫ · ПОДБОРКА MEDIASHELF");
+        featuredEyebrow.setTextSize(compactTvPreview?9:11);
+        copy.addView(featuredEyebrow,spaced(-1,compactTvPreview?17:25,0,3));
+        featuredTitle=label("Подбираем фильмы",compactTvPreview?16:tvLayout?26:19,
             MediaDesign.TEXT,true);
-        title.setMaxLines(compactTvPreview?2:3);
-        title.setEllipsize(TextUtils.TruncateAt.END);
-        textArea.addView(title,spaced(-1,
-            compactTvPreview?44:tvLayout?96:73,0,compactTvPreview?1:8));
-        TextView meta=label(item.size()+"   •   "+item.seeders+
-            " раздающих",13,0xffcfdbf5,false);
-        meta.setTextSize(compactTvPreview?10:13);
-        textArea.addView(meta,spaced(-1,compactTvPreview?16:24,
-            0,compactTvPreview?3:7));
-        TextView more=MediaDesign.tag(this,"ОТКРЫТЬ КАРТОЧКУ  ›",
-            Color.WHITE,0xff812edc);
-        more.setTextSize(compactTvPreview?9:11);
-        LinearLayout.LayoutParams tag=new LinearLayout.LayoutParams(-2,
-            dp(compactTvPreview?22:31));
-        textArea.addView(more,tag);
-        android.widget.FrameLayout.LayoutParams textP=
+        featuredTitle.setMaxLines(compactTvPreview?2:3);
+        featuredTitle.setEllipsize(TextUtils.TruncateAt.END);
+        copy.addView(featuredTitle,new LinearLayout.LayoutParams(-1,0,1));
+        featuredMeta=label("Проверяем постеры и доступность",compactTvPreview?10:13,
+            0xffd7d2ea,false);
+        featuredMeta.setMaxLines(1);
+        featuredMeta.setEllipsize(TextUtils.TruncateAt.END);
+        copy.addView(featuredMeta,spaced(-1,compactTvPreview?18:26,0,3));
+        if(!compactTvPreview){
+            TextView opening=MediaDesign.tag(this,"ОТКРЫТЬ ФИЛЬМ   ›",
+                Color.WHITE,0xff7529dc);
+            copy.addView(opening,new LinearLayout.LayoutParams(-2,dp(31)));
+        }
+        android.widget.FrameLayout.LayoutParams textParams=
             new android.widget.FrameLayout.LayoutParams(
-                dp(compactTvPreview?Math.max(215,(getResources().getConfiguration().screenWidthDp-160)/2):tvLayout?410:255),-1,
-                Gravity.LEFT|Gravity.TOP);
-        hero.addView(textArea,textP);
-        cards.addView(hero,spaced(-1,height,0,
-            compactTvPreview?10:tvLayout?25:22));
+                dp(compactTvPreview?
+                    Math.max(182,(getResources().getConfiguration().screenWidthDp-150)/2):
+                    tvLayout?485:245),-1,Gravity.LEFT|Gravity.TOP);
+        hero.addView(copy,textParams);
+
+        LinearLayout navigation=line();
+        navigation.setGravity(Gravity.CENTER_VERTICAL);
+        navigation.setPadding(dp(7),dp(3),dp(7),dp(3));
+        navigation.setBackground(MediaDesign.round(this,0xdc18152b,13));
+        Button back=button("‹");
+        back.setTextSize(compactTvPreview?20:26);
+        back.setContentDescription("Предыдущий фильм");
+        back.setPadding(0,0,0,0);
+        back.setOnClickListener(v->advanceCarousel(-1));
+        navigation.addView(back,lp(compactTvPreview?28:39,compactTvPreview?28:36));
+        featuredDots=label("",compactTvPreview?12:13,MediaDesign.ACCENT_LIGHT,true);
+        featuredDots.setGravity(Gravity.CENTER);
+        featuredDots.setContentDescription("Номер фильма в карусели");
+        navigation.addView(featuredDots,lp(compactTvPreview?65:93,
+            compactTvPreview?27:36));
+        Button forward=button("›");
+        forward.setTextSize(compactTvPreview?20:26);
+        forward.setContentDescription("Следующий фильм");
+        forward.setPadding(0,0,0,0);
+        forward.setOnClickListener(v->advanceCarousel(1));
+        navigation.addView(forward,lp(compactTvPreview?28:39,compactTvPreview?28:36));
+        featuredControls=navigation;
+        android.widget.FrameLayout.LayoutParams navParams=
+            new android.widget.FrameLayout.LayoutParams(-2,-2,
+                Gravity.RIGHT|Gravity.BOTTOM);
+        navParams.setMargins(0,0,dp(compactTvPreview?7:13),
+            dp(compactTvPreview?6:11));
+        hero.addView(navigation,navParams);
+
+        cards.addView(hero,spaced(-1,height,0,compactTvPreview?11:tvLayout?23:18));
+        renderCarouselSlide();
+    }
+
+    private void renderCarouselSlide(){
+        if(featuredHost==null || featuredTitle==null || featuredMeta==null ||
+            featuredHost.getParent()==null)return;
+        if(featuredItems.isEmpty()){
+            featuredTitle.setText(featuredLoading?
+                "Подбираем фильмы с обложками":
+                "Подборка фильмов пока недоступна");
+            featuredMeta.setText(featuredLoading?
+                "Загружаем из раздела «Фильмы»":
+                "Каталог работает. Проверь подключение к разделу «Фильмы»");
+            featuredEyebrow.setText("ФИЛЬМЫ · ПОДБОРКА MEDIASHELF");
+            if(featuredPoster!=null){
+                featuredPoster.setTag(null);
+                featuredPoster.setImageDrawable(null);
+            }
+            featuredControls.setVisibility(View.GONE);
+            scheduleCarousel();
+            return;
+        }
+        if(featuredIndex<0 || featuredIndex>=featuredItems.size())featuredIndex=0;
+        Item movie=featuredItems.get(featuredIndex);
+        featuredTitle.setText(movie.title);
+        String quality=MediaDesign.quality(movie.title);
+        featuredEyebrow.setText("ВЫБРАНО ИЗ РАЗДЕЛА «ФИЛЬМЫ»");
+        featuredMeta.setText((quality.isEmpty()?"Фильм":quality)+"  ·  "+
+            movie.seeders+" раздающих  ·  "+movie.size());
+        featuredControls.setVisibility(featuredItems.size()>1?View.VISIBLE:View.GONE);
+        StringBuilder dots=new StringBuilder();
+        for(int i=0;i<featuredItems.size();i++){
+            if(i>0)dots.append(' ');
+            dots.append(i==featuredIndex?'●':'○');
+        }
+        featuredDots.setText(dots.toString());
+        featuredDots.setContentDescription("Фильм "+(featuredIndex+1)+
+            " из "+featuredItems.size());
+        if(featuredPoster!=null){
+            featuredPoster.setTag(movie);
+            featuredPoster.setImageDrawable(null);
+            featuredPoster.setAlpha(0.6f);
+            loadImage(featuredPoster,movie.poster,referer(movie),movie,true);
+            featuredPoster.animate().alpha(1f).setDuration(270).start();
+        }
+        scheduleCarousel();
     }
     private static String catalogKey(Item item){
         if(item.details!=null && !item.details.isEmpty()){
@@ -1586,7 +1758,12 @@ public final class MainActivity extends Activity {
         if(!first)b.setNegativeButton("Отмена",null);
         b.show();
     }
-    @Override protected void onDestroy() {serial++;worker.shutdownNow();metadataWorker.shutdownNow();super.onDestroy();}
+    @Override protected void onDestroy() {
+        main.removeCallbacks(carouselAdvance);
+        featuredHost=null;
+        serial++;worker.shutdownNow();metadataWorker.shutdownNow();
+        super.onDestroy();
+    }
     private static String read(InputStream input) throws Exception {
         ByteArrayOutputStream out=new ByteArrayOutputStream();
         byte[] b=new byte[8192];int n;
