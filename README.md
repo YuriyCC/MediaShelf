@@ -54,3 +54,16 @@ App name in the launcher, MIUI security scan, Android TV launcher and system set
 - The all-sites search also collects source IDs and names from Jackett's `Indexers` report as a secondary list discovery mechanism.
 - Status shows indexer-list errors instead of pretending all sites are working; sites remain unverified until queried.
 - Install as an in-place update over MediaShelf 0.3 or 0.4 with the **same** signing certificate.
+
+## 0.6 — source-specific category and cover diagnosis
+
+**Why this release:** the phone showed `HTTP 400` from Jackett's global `/api/v2.0/indexers` endpoint even though indexed releases appeared. This prevented the category dialog for XXXClub and all selected sources. Many all-site results from torrent-pirat were also missing covers.
+
+- Category dialog fetches `/api/v2.0/indexers/<selected-id>/results/torznab/api?t=caps&apikey=...` **per site** and never depends on the global source-list endpoint.
+- Known XXXClub Torznab category mapping is bundled as fallback (Movies/DVD/WEB=6090, x264=6040, 4K=6045, SD=6080, Packs=6050, ImageSet=6060, VR/Other=6070).
+- For torrent-pirat, Jackett maps its many site forums to one generalized category `XXX=6000`. The native site forums are **not** silently treated as separately selectable categories. Specific site-forum support would require another adapter.
+- The site-aware HTML details adapter now supports XXXClub (real detail-page poster), torrent-pirat (phpBB post-body image candidates), and MyPornClub (post page image candidates). Other sources still show a clear no-cover placeholder until a dedicated parser is added.
+- The app has per-source diagnostics for search response, category availability, poster URL coverage and actual HTTP image access. The "check all" function checks on the user's network and can be slow; status claims are limited to actual results.
+- `MediaShelf` is still the fixed launcher name, and `versionCode` increases to 6 for upgrade over signed 0.5 with preserved certificate and preferences.
+
+**Testing disclaimer:** compilation/Android signature are checked by CI and local signing tools. No direct access to the user's private Home Assistant/Jackett or TV is available, so site-specific network behaviour and image heuristics require user-side testing. A URL returning HTTP 200 does not guarantee a correct poster (it could be a thumbnail); the app now prioritizes XXXClub's detail-page poster.
