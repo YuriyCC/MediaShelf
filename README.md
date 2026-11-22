@@ -1,26 +1,44 @@
-# MediaShelf 0.3 — Android TV proof of concept
+# MediaShelf 0.4 — Android TV and phone catalog
 
-MediaShelf is a native Android app to search Jackett torrents, display posters where provided, show detail pages for supported sites, and play through TorrServer and an external player.
+Native Android app for search through existing Jackett indexers, poster and details enrichment, and local/LAN TorrServer playback.
 
-## Device configuration
-- Jackett: `http://192.168.50.2:9117` while on the same home network
-- Enter your **own** Jackett API key in MediaShelf settings; never publish it
-- Default tracker: `xxxclub`; `all` can search multiple indexers
-- TorrServer: specify the actual configured address; `127.0.0.1:8090` is only valid for a server running on the same Android device
+## What's new in 0.4
 
-## Signing — IMPORTANT
-MediaShelf 0.1 and 0.2 were signed with distinct ephemeral debug keys. Android therefore requires a **one-time uninstall** before installing the newly signed 0.3. App preferences will be reset.
+- **TV-first design:** large focusable cards and a left source rail when screen width is 680dp or greater. Phone uses a compact source dropdown/menu and two-column grid.
+- **All sites / one site:** choose `Все сайты` to query Jackett meta indexer `all`, or choose one of the **configured** sites read dynamically from `/api/v2.0/indexers?configured=true`. No hardcoded 32-ID list.
+- **Real site categories:** for a selected site, category choices use the indexer's `caps` response and the request carries `Category[]`. For all-sites search, category taxonomies differ and are deliberately not mixed into one misleading list.
+- **Diagnostics:** on-demand individual probes and all-sites probes show results, poster field coverage, and indexer errors. A configured source is *not* automatically considered operational. Zero results on an empty query are not called a failure.
+- Search shortcuts, newest/popular sorting, TorrServer video file picker and external video playback remain.
 
-MediaShelf 0.3 is now signed with one **fixed, private test key**, kept OUTSIDE this public GitHub repository. It is preserved for the owner in the private `MediaShelf-0.3-RECOVERY-2026-11-22.zip` backup attached in the ChatGPT project conversation. Do not publish that archive, the keystore, or its password.
+## Verified versus unverified
 
-Future versions must keep the application ID `org.mediashelf.tv`, increase `versionCode`, and use the **same key from the private recovery archive**. Public GitHub Actions compiles an unsigned APK and provides Android build tools, while signing occurs privately after downloading the build. Never publish an ephemeral-signed debug build.
+Previous user test: searching XXXClub returned releases and poster images in MediaShelf 0.3. The 0.4 upgrade is compiled, but TV focus behavior, all 32 sites, site categories and player integration still require device/network testing. Other indexers are not falsely marked as tested. Per-site richer descriptions/screenshots require specific site parsers; currently XXXClub has the optional detail-page enrichment module.
 
-Certificate SHA-256 (public fingerprint only): `80:E4:EF:86:67:A9:C5:CF:7C:AF:B6:B4:94:82:29:A8:F9:5C:E5:81:A3:A3:F6:89:A2:6A:F1:3E:6D:15:46:DB`.
+Search for `Все сайты` uses Jackett `/api/v2.0/indexers/all/results`, and reads per-indexer status from `Indexers[]` where present. Selecting a site uses the same API with its actual indexer ID. Generic search categories are not invented for trackers that don't expose them.
 
-## Current prototype
-- Categories are text searches, not fully normalized genres
-- XXXClub detail-page enrichment can fetch poster, description and screenshots, but sites may block automated HTTP requests
-- TorrServer video files and external video-player integration
-- User device testing for poster reliability and playback is still in progress
+## Local connection settings
 
-Build scripts: `.github/workflows/build.yml`. The workflow does **not** publish installable APKs directly; installable signed versions are attached in the private ChatGPT conversation together with the recovery archive.
+- Jackett: `http://192.168.50.2:9117` for the user's existing home setup, or set another LAN address.
+- API key entered within the app (locally stored; never commit or paste the key into public source).
+- TorrServer: configure the actual service address. `127.0.0.1:8090` only works if TorrServer runs on the same Android device.
+
+## Stable installation signing (CRITICAL)
+
+Package name **`org.mediashelf.tv`** and fixed signing certificate SHA-256:
+
+`80:E4:EF:86:67:A9:C5:CF:7C:AF:B6:B4:94:82:29:A8:F9:5C:E5:81:A3:A3:F6:89:A2:6A:F1:3E:6D:15:46:DB`.
+
+Version 0.3 was first signed using the **private fixed test keystore** retained in the user's private recovery ZIP. Version 0.4 and all future releases must use that exact same key and increment `versionCode` (0.3 = 3; 0.4 = 4). **Do not generate another key.**
+
+This public GitHub repo deliberately only compiles an unsigned APK. The signed APK and private recovery ZIP are delivered in the ChatGPT conversation. The recovery ZIP contains the private signing key and password and must never be uploaded to a public repository.
+
+## Build workflow
+
+GitHub Actions `.github/workflows/build.yml` uses Gradle 8.9, JDK17, Android API35; outputs `MediaShelf-0.4-unsigned.apk`, `MediaShelf-0.4-source.zip`, and Android `apksigner.jar`/zipalign. The final APK must be aligned, signed privately with the preserved key, and verified via `apksigner verify --verbose --print-certs`.
+
+## Known limitations
+
+- Site-specific image/description scraping can break if websites change their markup or block app requests.
+- Some configured Jackett indexers can be unreachable; diagnostics explicitly distinguishes successful responses, no results and errors.
+- Generic category buttons such as Gangbang are query presets, not standardized categories across trackers.
+- This is an experimental standalone APK; do not expose Jackett/TorrServer to the public Internet.
