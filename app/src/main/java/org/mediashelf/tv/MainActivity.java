@@ -763,10 +763,24 @@ public final class MainActivity extends Activity {
             });
         });
     }
-    private void message(String m) {
+    private void message(String text) {
+        if(cards==null)return;
         cards.removeAllViews();
-        TextView t=label(m,17,MUTED,false);t.setPadding(dp(8),dp(20),dp(8),dp(20));
-        cards.addView(t);
+        LinearLayout empty=column();
+        empty.setGravity(Gravity.CENTER);
+        empty.setBackground(MediaDesign.gradient(this,
+            new int[]{0xff1b2941,0xff131b2b},22));
+        empty.setPadding(dp(18),dp(28),dp(18),dp(32));
+        TextView emblem=label("◌",35,MediaDesign.ACCENT,true);
+        emblem.setGravity(Gravity.CENTER);
+        empty.addView(emblem,spaced(-1,57,0,2));
+        TextView head=label("MediaShelf",19,MediaDesign.TEXT,true);
+        head.setGravity(Gravity.CENTER);
+        empty.addView(head,spaced(-1,31,0,5));
+        TextView detail=label(text,14,MediaDesign.MUTED,false);
+        detail.setGravity(Gravity.CENTER);
+        empty.addView(detail);
+        cards.addView(empty,lp(-1,tvLayout?230:195));
     }
     private void load(String q,String order) {
         lastQuery=q;
@@ -888,52 +902,136 @@ public final class MainActivity extends Activity {
         return m;
     }
     private void show(List<Item> items) {
-        int y=catalogScroll==null?0:catalogScroll.getScrollY();
+        int oldScroll=catalogScroll==null?0:catalogScroll.getScrollY();
         cards.removeAllViews();
-        TextView count=label(
-            "Получено: "+items.size()+" · показано: "+Math.min(items.size(),visibleCount)+
-            (sitePageCursor==null?"":" · страницы XXXClub: "+sitePageCursor.pageIndex),
-            13,MUTED,false);
-        count.setPadding(0,0,0,dp(12));cards.addView(count);
-        if(!pageInfo.isEmpty()) {
-            TextView note=label(pageInfo,12,MUTED,false);
-            note.setPadding(0,0,0,dp(10));
-            cards.addView(note);
+
+        if(!items.isEmpty() && lastQuery.isEmpty() && currentCategory==0 &&
+            (lastSort.equals("latest")||lastSort.equals("popular")))
+            addFeaturedHero(items.get(0));
+
+        LinearLayout heading=line();
+        LinearLayout left=column();
+        String category=currentCategory>0?
+            currentCategoryLabel:lastQuery.isEmpty()?
+                lastSort.equals("popular")?"ПОПУЛЯРНОЕ":"НОВЫЕ РАЗДАЧИ":
+                "ПОИСК ПО КАТАЛОГУ";
+        left.addView(eyebrow(category.toUpperCase(Locale.ROOT)));
+        TextView caption=label(lastQuery.isEmpty()?"Подборка из каталога":
+                "Результаты: "+lastQuery,tvLayout?22:19,MediaDesign.TEXT,true);
+        caption.setMaxLines(2);
+        caption.setEllipsize(TextUtils.TruncateAt.END);
+        left.addView(caption);
+        heading.addView(left,new LinearLayout.LayoutParams(0,dp(56),1));
+        TextView number=MediaDesign.tag(this,items.size()+" найдено",
+            MediaDesign.ACCENT_LIGHT,0xff263955);
+        heading.addView(number);
+        cards.addView(heading,spaced(-1,60,0,5));
+        TextView line=label("Показано "+Math.min(items.size(),visibleCount)+
+            " · Страниц сайта: "+(sitePageCursor!=null?sitePageCursor.pageIndex:"—"),
+            12,MediaDesign.MUTED,false);
+        cards.addView(line,spaced(-1,24,0,8));
+
+        if(!pageInfo.isEmpty()){
+            TextView note=label(pageInfo,12,0xff8fa8d1,false);
+            note.setMaxLines(2);
+            note.setEllipsize(TextUtils.TruncateAt.END);
+            note.setPadding(dp(13),dp(8),dp(13),dp(8));
+            note.setBackground(MediaDesign.round(this,0xff172238,10));
+            cards.addView(note,spaced(-1,-2,0,18));
         }
-        if(items.isEmpty() && sitePageCursor==null) {
-            TextView empty=label("Поиск не вернул результатов. Попробуй другой запрос или источник.",15,MUTED,false);
-            cards.addView(empty);
+        if(items.isEmpty() && sitePageCursor==null){
+            LinearLayout state=column();
+            state.setGravity(Gravity.CENTER);
+            state.setPadding(dp(12),dp(33),dp(12),dp(33));
+            TextView mark=label("⌕",44,0xff6d88b9,true);
+            mark.setGravity(Gravity.CENTER);
+            state.addView(mark);
+            TextView info=label("Здесь пока нет раздач",20,MediaDesign.TEXT,true);
+            info.setGravity(Gravity.CENTER);
+            state.addView(info,spaced(-1,50,0,2));
+            TextView help=label("Попробуй другое слово или выбери раздел сайта",13,
+                MediaDesign.MUTED,false);
+            help.setGravity(Gravity.CENTER);
+            state.addView(help);
+            cards.addView(state);
             return;
         }
-        int usableDp=getResources().getConfiguration().screenWidthDp-(tvLayout?280:34);
-        int cols=tvLayout ? Math.max(3,Math.min(6,Math.max(480,usableDp)/200)) : 2;
-        int cardW=Math.max(130,(usableDp-(cols-1)*10)/cols);
+        int screen=getResources().getConfiguration().screenWidthDp;
+        int usable=screen-(tvLayout?302:32);
+        int spacing=tvLayout?14:10;
+        int columns=tvLayout?
+            Math.max(3,Math.min(6,(usable+spacing)/188)):
+            2;
+        int cardWidth=Math.max(tvLayout?160:130,(usable-(columns-1)*spacing)/columns);
+        int coverHeight=(int)(cardWidth*(tvLayout?1.25f:1.12f));
         GridLayout grid=new GridLayout(this);
-        grid.setColumnCount(cols);
+        grid.setColumnCount(columns);
+        grid.setClipChildren(false);
+        grid.setClipToPadding(false);
+        grid.setPadding(dp(2),dp(4),dp(2),dp(5));
         cards.addView(grid);
         int limit=Math.min(visibleCount,items.size());
-        for(int i=0;i<limit;i++) {
+
+        for(int i=0;i<limit;i++){
             Item item=items.get(i);
             LinearLayout tile=column();
-            tile.setBackground(panel(PANEL,false));tile.setPadding(dp(6),dp(6),dp(6),dp(8));
+            tile.setBackground(MediaDesign.round(this,MediaDesign.SURFACE,17));
+            tile.setPadding(dp(6),dp(6),dp(6),dp(10));
             tile.setClickable(true);tile.setFocusable(true);
-            tile.setOnFocusChangeListener((v,f)->v.setBackground(panel(f?0xff34415c:PANEL,f)));
+            tile.setContentDescription(item.title+"; "+item.size()+
+                "; сидов "+item.seeders+"; "+item.tracker);
+            tile.setOnFocusChangeListener((v,f)->{
+                tile.setBackground(f?
+                    MediaDesign.outlined(this,0xff2a3d5f,
+                        MediaDesign.ACCENT,17,2):
+                    MediaDesign.round(this,MediaDesign.SURFACE,17));
+                MediaDesign.animateFocus(tile,f);
+            });
             android.widget.FrameLayout cover=new android.widget.FrameLayout(this);
-            cover.setBackground(panel(0xff34425e,false));
-            TextView noCover=label("Обложка не получена",12,MUTED,false);
-            noCover.setGravity(Gravity.CENTER);
-            cover.addView(noCover,new android.widget.FrameLayout.LayoutParams(-1,-1));
-            ImageView img=new ImageView(this);img.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            cover.addView(img,new android.widget.FrameLayout.LayoutParams(-1,-1));
-            tile.addView(cover,lp(-1,tvLayout?166:132));
-            loadPoster(img,item,i<25);
-            TextView name=label(item.title,13,WHITE,true);
-            name.setMaxLines(3);name.setEllipsize(TextUtils.TruncateAt.END);
-            name.setPadding(dp(5),dp(7),dp(5),0);
-            tile.addView(name,new LinearLayout.LayoutParams(-1,0,1));
-            TextView meta=label(item.tracker+" · "+item.size()+" · сиды "+item.seeders,11,MUTED,false);
-            meta.setSingleLine(true);meta.setEllipsize(TextUtils.TruncateAt.END);
-            tile.addView(meta);
+            cover.setBackground(MediaDesign.gradient(this,
+                new int[]{0xff314566,0xff151d31,0xff11192a},14));
+            cover.setClipToOutline(true);
+            TextView placeholder=label("▶\n\nНет обложки",12,0xff8396b8,false);
+            placeholder.setGravity(Gravity.CENTER);
+            cover.addView(placeholder,new android.widget.FrameLayout.LayoutParams(-1,-1));
+            ImageView image=new ImageView(this);
+            image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            cover.addView(image,new android.widget.FrameLayout.LayoutParams(-1,-1));
+
+            String quality=MediaDesign.quality(item.title);
+            if(!quality.isEmpty()){
+                TextView qualityLabel=MediaDesign.tag(this,quality,
+                    0xfff5eddd,0xd8243047);
+                android.widget.FrameLayout.LayoutParams qualityParams=
+                    new android.widget.FrameLayout.LayoutParams(-2,-2,
+                        Gravity.TOP|Gravity.RIGHT);
+                qualityParams.setMargins(0,dp(9),dp(9),0);
+                cover.addView(qualityLabel,qualityParams);
+            }
+            if(item.seeders>0){
+                TextView seeds=MediaDesign.tag(this,"● "+item.seeders,
+                    MediaDesign.SUCCESS,0xdd182b35);
+                android.widget.FrameLayout.LayoutParams seedParams=
+                    new android.widget.FrameLayout.LayoutParams(-2,-2,
+                        Gravity.BOTTOM|Gravity.LEFT);
+                seedParams.setMargins(dp(8),0,0,dp(8));
+                cover.addView(seeds,seedParams);
+            }
+            tile.addView(cover,lp(-1,coverHeight));
+            loadPoster(image,item,i<24);
+
+            TextView title=label(item.title,tvLayout?14:13,
+                MediaDesign.TEXT,true);
+            title.setMaxLines(3);
+            title.setEllipsize(TextUtils.TruncateAt.END);
+            title.setPadding(dp(7),dp(10),dp(7),0);
+            tile.addView(title,new LinearLayout.LayoutParams(-1,0,1));
+            TextView facts=label(item.size()+"  ·  "+item.tracker,
+                11,MediaDesign.MUTED,false);
+            facts.setSingleLine(true);
+            facts.setEllipsize(TextUtils.TruncateAt.END);
+            facts.setPadding(dp(7),dp(5),0,0);
+            tile.addView(facts);
             tile.setOnClickListener(v->details(item));
             tile.setOnKeyListener((v,key,event)->{
                 if(event.getAction()==android.view.KeyEvent.ACTION_DOWN &&
@@ -944,31 +1042,118 @@ public final class MainActivity extends Activity {
                 return false;
             });
             GridLayout.LayoutParams p=new GridLayout.LayoutParams(
-                GridLayout.spec(i/cols),GridLayout.spec(i%cols));
-            p.width=dp(cardW);p.height=dp(tvLayout?270:232);
-            p.rightMargin=dp(10);p.bottomMargin=dp(10);
+                GridLayout.spec(i/columns),GridLayout.spec(i%columns));
+            p.width=dp(cardWidth);
+            p.height=dp(coverHeight+(tvLayout?99:88));
+            p.rightMargin=dp(spacing);
+            p.bottomMargin=dp(tvLayout?16:12);
             grid.addView(tile,p);
+            if(i==focusItemAfterLoad){
+                focusItemAfterLoad=-1;
+                tile.post(tile::requestFocus);
+            }
         }
         if(items.size()>limit){
-            Button reveal=button("Показать ещё "+Math.min(60,items.size()-limit)+" из уже полученных");
+            int next=Math.min(24,items.size()-limit);
+            Button reveal=accentButton("Показать ещё "+next+"  ↓");
             reveal.setOnClickListener(v->{
-                visibleCount+=60;
+                focusItemAfterLoad=limit;
+                visibleCount+=24;
                 show(catalogItems);
             });
-            cards.addView(reveal,lp(-1,52));
+            cards.addView(reveal,spaced(-1,54,0,12));
         }
         if(sitePageCursor!=null){
             if(!sitePageCursor.finished){
-                Button more=button(loadingNextPage?"Загрузка страницы…":"Загрузить ещё с XXXClub");
+                Button more=button(loadingNextPage?
+                    "Получаем следующую страницу…":
+                    "Загрузить следующую страницу  ↓");
                 more.setEnabled(!loadingNextPage);
-                more.setOnClickListener(v->loadNextPage());
-                cards.addView(more,lp(-1,56));
-            }else {
-                TextView end=label("Дальнейшие страницы не обнаружены на сайте. Это не гарантирует, что фильмов больше нет.",12,MUTED,false);
-                cards.addView(end);
+                more.setTextColor(MediaDesign.ACCENT_LIGHT);
+                more.setBackground(MediaDesign.outlined(this,
+                    0xff202f49,0xff3d5b8b,14,1));
+                more.setOnFocusChangeListener((v,f)->{
+                    more.setBackground(f?
+                        MediaDesign.outlined(this,0xff2c426a,
+                            MediaDesign.ACCENT,14,2):
+                        MediaDesign.outlined(this,0xff202f49,0xff3d5b8b,14,1));
+                    MediaDesign.animateFocus(more,f);
+                });
+                more.setOnClickListener(v->{
+                    focusItemAfterLoad=catalogItems.size();
+                    loadNextPage();
+                });
+                cards.addView(more,spaced(-1,57,0,14));
+            }else{
+                TextView end=label("Это последняя обнаруженная страница. "+
+                    "Если на сайте есть ещё, сообщи об этом — проверим навигацию.",
+                    12,MediaDesign.MUTED,false);
+                end.setGravity(Gravity.CENTER);
+                end.setPadding(dp(12),dp(10),dp(12),dp(10));
+                cards.addView(end,lp(-1,-2));
             }
         }
-        if(catalogScroll!=null)catalogScroll.post(()->catalogScroll.scrollTo(0,y));
+        if(catalogScroll!=null){
+            catalogScroll.post(()->{
+                if(focusItemAfterLoad>=0)return;
+                catalogScroll.scrollTo(0,oldScroll);
+            });
+        }
+    }
+
+    private void addFeaturedHero(Item item){
+        android.widget.FrameLayout hero=new android.widget.FrameLayout(this);
+        hero.setBackground(MediaDesign.horizontal(this,
+            new int[]{0xff263c68,0xff172b4c,0xff121e36},22));
+        hero.setClipToOutline(true);
+        hero.setFocusable(true);
+        hero.setClickable(true);
+        hero.setOnFocusChangeListener((v,focused)->{
+            hero.setBackground(focused?
+                MediaDesign.outlined(this,0xff294975,MediaDesign.ACCENT,22,2):
+                MediaDesign.horizontal(this,
+                    new int[]{0xff263c68,0xff172b4c,0xff121e36},22));
+            MediaDesign.animateFocus(hero,focused);
+        });
+        hero.setOnClickListener(v->details(item));
+        int height=tvLayout?224:170;
+
+        ImageView art=new ImageView(this);
+        art.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        art.setTag(item);
+        android.widget.FrameLayout.LayoutParams artP=
+            new android.widget.FrameLayout.LayoutParams(
+                dp(tvLayout?340:180),-1,Gravity.RIGHT|Gravity.TOP);
+        hero.addView(art,artP);
+        if(!item.poster.isEmpty())loadImage(art,item.poster,referer(item),item,true);
+        if(SiteDetails.supported(item))refreshMetadata(item,art);
+        View fade=new View(this);
+        fade.setBackground(MediaDesign.horizontal(this,
+            new int[]{0xff263c68,0xee263c68,0x55263c68,0x00263c68},22));
+        hero.addView(fade,new android.widget.FrameLayout.LayoutParams(-1,-1));
+
+        LinearLayout textArea=column();
+        textArea.setGravity(Gravity.CENTER_VERTICAL);
+        textArea.setPadding(dp(tvLayout?29:18),dp(13),0,dp(15));
+        TextView up=eyebrow(lastSort.equals("popular")?
+            "ИЗ ПОПУЛЯРНОГО":"СЕГОДНЯ В КАТАЛОГЕ");
+        textArea.addView(up,spaced(-1,27,0,8));
+        TextView title=label(item.title,tvLayout?25:18,MediaDesign.TEXT,true);
+        title.setMaxLines(3);
+        title.setEllipsize(TextUtils.TruncateAt.END);
+        textArea.addView(title,spaced(-1,tvLayout?96:73,0,8));
+        TextView meta=label(item.size()+"   •   "+item.seeders+
+            " раздающих",13,0xffcfdbf5,false);
+        textArea.addView(meta,spaced(-1,24,0,7));
+        TextView more=MediaDesign.tag(this,"ОТКРЫТЬ КАРТОЧКУ  ›",
+            Color.WHITE,0xff5c7ec5);
+        LinearLayout.LayoutParams tag=new LinearLayout.LayoutParams(-2,dp(31));
+        textArea.addView(more,tag);
+        android.widget.FrameLayout.LayoutParams textP=
+            new android.widget.FrameLayout.LayoutParams(
+                dp(tvLayout?410:255),-1,Gravity.LEFT|Gravity.TOP);
+        hero.addView(textArea,textP);
+        cards.addView(hero,spaced(-1,height,0,tvLayout?25:22));
     }
     private static String catalogKey(Item item){
         if(item.details!=null && !item.details.isEmpty()){
