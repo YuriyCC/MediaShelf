@@ -93,6 +93,13 @@ public final class MainActivity extends Activity {
     private ScrollView catalogScroll;
     private final ExecutorService worker = Executors.newFixedThreadPool(4);
     private final ExecutorService metadataWorker = Executors.newFixedThreadPool(3);
+    private final ExecutorService imageWorker = Executors.newFixedThreadPool(5);
+    private final ExecutorService fullImageWorker = Executors.newSingleThreadExecutor();
+    private View catalogPage;
+    private View detailsPage;
+    private View fullPhotoPage;
+    private View cardReturnFocus;
+    private int cardReturnScroll;
     private final Handler main = new Handler(Looper.getMainLooper());
     private SharedPreferences prefs;
     private FavoritesStore favorites;
@@ -474,6 +481,9 @@ public final class MainActivity extends Activity {
         outer.setGravity(Gravity.TOP);
         outer.setBackgroundColor(MediaDesign.BG);
         outer.setFocusableInTouchMode(true);
+        catalogPage=outer;
+        detailsPage=null;
+        fullPhotoPage=null;
         setContentView(outer);
         outer.requestFocus();
         if(tvLayout){
@@ -873,6 +883,23 @@ public final class MainActivity extends Activity {
     }
 
     @Override public void onBackPressed(){
+        if(fullPhotoPage!=null){
+            fullPhotoPage=null;
+            if(detailsPage!=null)setContentView(detailsPage);
+            return;
+        }
+        if(detailsPage!=null){
+            detailsPage=null;
+            if(catalogPage!=null)setContentView(catalogPage);
+            if(favoritesMode){
+                openFavorites();
+            }else if(catalogScroll!=null){
+                catalogScroll.post(()->catalogScroll.scrollTo(0,cardReturnScroll));
+                if(cardReturnFocus!=null)
+                    cardReturnFocus.post(cardReturnFocus::requestFocus);
+            }
+            return;
+        }
         if(tvLayout && !sidebarCollapsed){
             setSidebarCollapsed(true,true);
             return;
@@ -1755,6 +1782,11 @@ public final class MainActivity extends Activity {
             facts.setPadding(dp(compactTvPreview?3:7),dp(compactTvPreview?2:5),0,0);
             tile.addView(facts);
             tile.setOnClickListener(v->details(item));
+            tile.setLongClickable(true);
+            tile.setOnLongClickListener(v->{
+                showTileActions(item);
+                return true;
+            });
             final int tileRow=i/columns;
             final int tileColumn=i%columns;
             tile.setOnKeyListener((v,key,event)->{
@@ -1773,10 +1805,8 @@ public final class MainActivity extends Activity {
                     focusTopSearch();
                     return true;
                 }
-                if(key==android.view.KeyEvent.KEYCODE_DPAD_CENTER ||
-                   key==android.view.KeyEvent.KEYCODE_ENTER){
-                    details(item);return true;
-                }
+                // Let Android deliver the native short/long click on ENTER/CENTER.
+                // Intercepting ACTION_DOWN here used to open details before a long press.
                 return false;
             });
             GridLayout.LayoutParams p=new GridLayout.LayoutParams(
@@ -2101,117 +2131,242 @@ public final class MainActivity extends Activity {
             });
         });
     }
-    private void loadImage(ImageView view,String link,String referer,Item item,boolean fallBackToDetails) {
-        if(!link.startsWith("http://") && !link.startsWith("https://")) {
+    private void loadImage(ImageView view,String link,String referer,Item item,boolean fallBackToDetails){
+        loadImage(view,link,referer,item,fallBackToDetails,false);
+    }
+    private void loadImage(ImageView view,String link,String referrer,Item item,
+                           boolean fallBackToDetails,boolean fullResolution) {
+        if(link==null || (!link.startsWith("http://") && !link.startsWith("https://"))) {
             if(fallBackToDetails && item!=null)refreshMetadata(item,view);
             return;
         }
-        Bitmap cached=pictureCache.get(link);
+        final String cacheKey=(fullResolution?"full:":"poster:")+link;
+        Bitmap cached=pictureCache.get(cacheKey);
         if(cached!=null && !cached.isRecycled()){
             if(item==null || view.getTag()==item)view.setImageBitmap(cached);
             return;
         }
-        worker.execute(()->{
-            HttpURLConnection c=null;
-            try {
-                c=(HttpURLConnection)new URL(link).openConnection();
-                c.setConnectTimeout(9000);c.setReadTimeout(14000);
-                c.setInstanceFollowRedirects(true);
-                c.setRequestProperty("User-Agent",SiteDetails.USER_AGENT);
-                c.setRequestProperty("Referer",referer);
-                c.setRequestProperty("Accept","image/avif,image/webp,image/apng,image/*,*/*;q=0.8");
-                int status=c.getResponseCode();
-                if(status!=200)throw new IllegalStateException("Изображение HTTP "+status);
-                BitmapFactory.Options opts=new BitmapFactory.Options();opts.inSampleSize=2;
-                Bitmap bitmap;
-                try(InputStream in=c.getInputStream()) { bitmap=BitmapFactory.decodeStream(in,null,opts); }
-                if(bitmap==null)throw new IllegalStateException("Неверный формат изображения");
-                pictureCache.put(link,bitmap);
+        (fullResolution?fullImageWorker:imageWorker).execute(()->{
+            HttpURLConnection connection=null;
+            try{
+                connection=(HttpURLConnection)new URL(link).openConnection();
+                connection.setConnectTimeout(8500);
+                connection.setReadTimeout(fullResolution?25000:13000);
+                connection.setInstanceFollowRedirects(true);
+                connection.setUseCaches(true);
+                connection.setRequestProperty("User-Agent",SiteDetails.USER_AGENT);
+                connection.setRequestProperty("Referer",referrer);
+                connection.setRequestProperty("Accept","image/webp,image/jpeg,image/png,image/*;q=0.8");
+                if(connection.getResponseCode()!=200)
+                    throw new IllegalStateException("Изображение HTTP "+connection.getResponseCode());
+
+                ByteArrayOutputStream buffer=new ByteArrayOutputStream();
+                try(InputStream in=connection.getInputStream()){
+                    byte[] part=new byte[16384];
+                    int count;
+                    while((count=in.read(part))!=-1){
+                        buffer.write(part,0,count);
+                        if(buffer.size()>20_000_000)
+                            throw new IllegalStateException("Слишком большое изображение");
+                    }
+                }
+                byte[] bytes=buffer.toByteArray();
+                BitmapFactory.Options bounds=new BitmapFactory.Options();
+                bounds.inJustDecodeBounds=true;
+                BitmapFactory.decodeByteArray(bytes,0,bytes.length,bounds);
+                int maxSide=fullResolution?3200:1000;
+                int sample=1;
+                while(Math.max(bounds.outWidth,bounds.outHeight)>maxSide*sample*2)
+                    sample*=2;
+                BitmapFactory.Options decode=new BitmapFactory.Options();
+                decode.inSampleSize=sample;
+                Bitmap bitmap=BitmapFactory.decodeByteArray(bytes,0,bytes.length,decode);
+                if(bitmap==null)throw new IllegalStateException("Формат изображения не поддерживается");
+                // Fullscreen bitmaps may exceed the thumbnail cache; do not evict all posters.
+                if(bitmap.getByteCount()<pictureCache.maxSize()/2)
+                    pictureCache.put(cacheKey,bitmap);
                 if(item!=null)item.imageError="";
-                main.post(()->{if(!isFinishing() && (item==null || view.getTag()==item))view.setImageBitmap(bitmap);});
-            }catch(Exception e) {
-                if(item!=null)item.imageError=error(e);
+                main.post(()->{
+                    if(!isFinishing() && (item==null || view.getTag()==item))
+                        view.setImageBitmap(bitmap);
+                });
+            }catch(Exception error){
+                if(item!=null)item.imageError=error(error);
                 if(fallBackToDetails && item!=null)refreshMetadata(item,view);
-            }finally{if(c!=null)c.disconnect();}
+            }finally{
+                if(connection!=null)connection.disconnect();
+            }
         });
     }
+    private void showTileActions(Item item){
+        boolean marked=favorites.contains(favoriteRecord(item));
+        String[] actions={"▶  Смотреть",
+            marked?"★  Убрать из избранного":"☆  Добавить в избранное"};
+        new AlertDialog.Builder(this)
+            .setTitle(item.title)
+            .setItems(actions,(dialog,selected)->{
+                if(selected==0){
+                    if(item.link().isEmpty() && SiteDetails.supported(item) &&
+                       !item.detailsFetched){
+                        metadataWorker.execute(()->{
+                            SiteDetails.enrich(item);
+                            main.post(()->{
+                                if(!isFinishing())play(item);
+                            });
+                        });
+                    }else play(item);
+                }else{
+                    boolean added=favorites.toggle(favoriteRecord(item));
+                    Toast.makeText(this,added?"Добавлено в избранное":"Удалено из избранного",
+                        Toast.LENGTH_SHORT).show();
+                    if(favoritesMode)openFavorites();
+                }
+            })
+            .setNegativeButton("Отмена",null)
+            .show();
+    }
     private void details(Item item) {
+        cardReturnFocus=getCurrentFocus();
+        cardReturnScroll=catalogScroll==null?0:catalogScroll.getScrollY();
         if(SiteDetails.supported(item) && !item.detailsFetched) {
             Toast.makeText(this,"Загружаем описание и кадры...",Toast.LENGTH_SHORT).show();
             metadataWorker.execute(()->{
                 SiteDetails.enrich(item);
                 main.post(()->{if(!isFinishing())showDetails(item);});
             });
-        } else showDetails(item);
+        }else showDetails(item);
     }
     private void showDetails(Item item) {
-        final int contentWidth=tvLayout?Math.min(910,
-            getResources().getConfiguration().screenWidthDp-80):
-            getResources().getConfiguration().screenWidthDp-22;
-        LinearLayout root=column();
-        root.setPadding(dp(tvLayout?27:17),dp(tvLayout?23:16),
-            dp(tvLayout?27:17),dp(20));
-        root.setBackground(MediaDesign.gradient(this,
-            new int[]{0xff243453,0xff141e30,0xff111827},22));
+        // Replace the content with a dedicated film page, like a TV media library.
+        // Back restores the existing catalog views, focus and scroll offset.
+        LinearLayout page=column();
+        page.setBackgroundColor(MediaDesign.BG);
+        LinearLayout toolbar=line();
+        toolbar.setPadding(dp(tvLayout?22:12),dp(8),dp(12),dp(8));
+        Button goBack=button("‹  Назад");
+        goBack.setTextSize(14);
+        goBack.setOnClickListener(v->onBackPressed());
+        toolbar.addView(goBack,spaced(tvLayout?120:93,43,12,0));
+        TextView path=label("MediaShelf   /   "+item.tracker,14,MediaDesign.MUTED,false);
+        path.setSingleLine(true);
+        path.setEllipsize(TextUtils.TruncateAt.END);
+        toolbar.addView(path,new LinearLayout.LayoutParams(0,dp(43),1));
+        page.addView(toolbar,spaced(-1,59,0,0));
+
+        View topLine=new View(this);
+        topLine.setBackgroundColor(0xff30284a);
+        page.addView(topLine,lp(-1,1));
+
         ScrollView scroll=new ScrollView(this);
-        scroll.setFillViewport(false);
+        scroll.setFillViewport(true);
         scroll.setVerticalScrollBarEnabled(false);
-        scroll.addView(root);
+        LinearLayout root=column();
+        root.setPadding(dp(tvLayout?24:14),dp(tvLayout?22:14),
+                        dp(tvLayout?24:14),dp(34));
+        root.setBackground(MediaDesign.gradient(this,
+            new int[]{0xff1a1933,0xff101629,0xff080e1b},18));
+        int maxDp=tvLayout?Math.min(1130,
+            getResources().getConfiguration().screenWidthDp-70):
+            getResources().getConfiguration().screenWidthDp-14;
+        android.widget.FrameLayout.LayoutParams bodyParams=
+            new android.widget.FrameLayout.LayoutParams(dp(maxDp),-2,
+                Gravity.TOP|Gravity.CENTER_HORIZONTAL);
+        scroll.addView(root,bodyParams);
 
         LinearLayout head=line();
         head.setGravity(Gravity.TOP);
+        int posterWidth=tvLayout?230:112;
+        int posterHeight=tvLayout?310:158;
+        LinearLayout posterColumn=column();
         ImageView poster=new ImageView(this);
         poster.setBackground(MediaDesign.gradient(this,
             new int[]{0xff304567,0xff1a2940},15));
         poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
         poster.setTag(item);
         poster.setClipToOutline(true);
-        head.addView(poster,spaced(tvLayout?225:112,tvLayout?301:158,17,0));
+        posterColumn.addView(poster,spaced(posterWidth,posterHeight,0,8));
         loadPoster(poster,item,false);
 
+        LinearLayout posterButtons=line();
+        Button watch=accentButton("▶");
+        watch.setTextSize(tvLayout?20:16);
+        watch.setContentDescription("Смотреть");
+        watch.setEnabled(!item.link().isEmpty());
+        watch.setAlpha(watch.isEnabled()?1:0.55f);
+        posterButtons.addView(watch,new LinearLayout.LayoutParams(0,dp(42),1));
+        JSONObject record=favoriteRecord(item);
+        Button bookmark=button(favorites.contains(record)?"★":"☆");
+        bookmark.setTextSize(tvLayout?24:19);
+        bookmark.setContentDescription(favorites.contains(record)?
+            "Убрать из избранного":"Добавить в избранное");
+        bookmark.setTextColor(MediaDesign.ACCENT_LIGHT);
+        LinearLayout.LayoutParams favParams=new LinearLayout.LayoutParams(0,dp(42),1);
+        favParams.leftMargin=dp(7);
+        posterButtons.addView(bookmark,favParams);
+        posterColumn.addView(posterButtons,lp(posterWidth,42));
+        head.addView(posterColumn,spaced(posterWidth,-2,tvLayout?24:14,0));
+
         LinearLayout facts=column();
-        facts.addView(eyebrow("КАРТОЧКА РАЗДАЧИ  /  "+
-            item.tracker.toUpperCase(Locale.ROOT)),spaced(-1,22,0,8));
-        TextView title=label(item.title,tvLayout?25:18,
-            MediaDesign.TEXT,true);
+        facts.addView(eyebrow("РАЗДАЧА  /  "+item.tracker.toUpperCase(Locale.ROOT)),
+            spaced(-1,23,0,9));
+        TextView title=label(item.title,tvLayout?28:18,MediaDesign.TEXT,true);
         title.setMaxLines(tvLayout?7:6);
         title.setEllipsize(TextUtils.TruncateAt.END);
-        facts.addView(title,spaced(-1,-2,0,tvLayout?17:10));
-
+        facts.addView(title,spaced(-1,-2,0,tvLayout?20:13));
         LinearLayout tags=line();
         String quality=MediaDesign.quality(item.title);
         if(!quality.isEmpty())
-            tags.addView(MediaDesign.tag(this,quality,0xffeed9b8,
-                0xff3a3540),spaced(-2,-2,7,0));
-        tags.addView(MediaDesign.tag(this,item.size(),
-            MediaDesign.TEXT,0xff30466b),spaced(-2,-2,7,0));
+            tags.addView(MediaDesign.tag(this,quality,MediaDesign.ACCENT_LIGHT,0xff39245b),
+                spaced(-2,-2,6,0));
+        tags.addView(MediaDesign.tag(this,item.size(),MediaDesign.TEXT,0xff30466b),
+            spaced(-2,-2,6,0));
         if(item.seeders>0)
             tags.addView(MediaDesign.tag(this,"● "+item.seeders+" сидов",
                 MediaDesign.SUCCESS,0xff233a3f));
-        facts.addView(tags,spaced(-1,37,0,12));
-
+        facts.addView(tags,spaced(-1,38,0,12));
         TextView origin=label("ИСТОЧНИК  ·  "+item.tracker+"\n"+
-            (item.date.isEmpty()?"":("ДОБАВЛЕНО  ·  "+item.date)),
+            (item.date.isEmpty()?"":"ДОБАВЛЕНО  ·  "+item.date),
             tvLayout?13:11,MediaDesign.MUTED,false);
         origin.setMaxLines(3);
-        facts.addView(origin,lp(-1,-2));
+        facts.addView(origin,spaced(-1,-2,0,13));
+        Button site=button("На сайте ↗");
+        site.setTextSize(12);
+        site.setEnabled(!item.details.isEmpty());
+        facts.addView(site,spaced(tvLayout?135:107,37,0,0));
         head.addView(facts,new LinearLayout.LayoutParams(0,-2,1));
-        root.addView(head,spaced(-1,-2,0,18));
+        root.addView(head,spaced(-1,-2,0,22));
 
-        View divider=new View(this);
-        divider.setBackgroundColor(0xff3c4b69);
-        root.addView(divider,spaced(-1,1,0,17));
-        root.addView(eyebrow("О РАЗДАЧЕ"),spaced(-1,24,0,3));
-        TextView description=label(
-            item.description.isEmpty()?
-                "Описание не опубликовано или пока не удалось получить его с сайта.":
-                item.description,
-            tvLayout?15:13,0xffd2dcee,false);
-        description.setLineSpacing(dp(4),1.0f);
+        watch.setOnClickListener(v->play(item));
+        bookmark.setOnClickListener(v->{
+            boolean added=favorites.toggle(favoriteRecord(item));
+            bookmark.setText(added?"★":"☆");
+            bookmark.setContentDescription(added?
+                "Убрать из избранного":"Добавить в избранное");
+            if(favoritesMode)
+                Toast.makeText(this,added?"Добавлено":"Удалено из избранного",
+                    Toast.LENGTH_SHORT).show();
+        });
+        site.setOnClickListener(v->{
+            if(item.details.isEmpty())return;
+            try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(item.details)));}
+            catch(Exception e){
+                Toast.makeText(this,"Не удалось открыть сайт: "+error(e),
+                    Toast.LENGTH_LONG).show();
+            }
+        });
+
+        View separator=new View(this);
+        separator.setBackgroundColor(0xff3c3454);
+        root.addView(separator,spaced(-1,1,0,17));
+        root.addView(eyebrow("О РАЗДАЧЕ"),spaced(-1,24,0,5));
+        TextView description=label(item.description.isEmpty()?
+            "Описание не опубликовано или пока не удалось получить его с сайта.":
+            item.description,tvLayout?15:13,0xffd2dcee,false);
+        description.setLineSpacing(dp(4),1f);
         root.addView(description,spaced(-1,-2,0,22));
 
         if(!item.screenshots.isEmpty()){
-            root.addView(eyebrow("СКРИНШОТЫ"),spaced(-1,31,0,3));
+            root.addView(eyebrow("ДОПОЛНИТЕЛЬНЫЕ ФОТО"),spaced(-1,31,0,3));
             android.widget.HorizontalScrollView gallery=
                 new android.widget.HorizontalScrollView(this);
             gallery.setHorizontalScrollBarEnabled(false);
@@ -2222,76 +2377,48 @@ public final class MainActivity extends Activity {
                 still.setBackground(MediaDesign.round(this,0xff233149,12));
                 still.setClipToOutline(true);
                 still.setFocusable(true);
-                images.addView(still,spaced(tvLayout?192:135,tvLayout?118:91,11,9));
+                still.setClickable(true);
+                images.addView(still,spaced(tvLayout?202:135,tvLayout?125:91,11,9));
                 loadImage(still,imageUrl,referer(item),null,false);
-                still.setOnFocusChangeListener((v,f)->MediaDesign.animateFocus(v,f));
-                still.setOnClickListener(v->{
-                    ImageView full=new ImageView(this);
-                    full.setBackgroundColor(MediaDesign.BG);
-                    full.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                    loadImage(full,imageUrl,referer(item),null,false);
-                    AlertDialog preview=new AlertDialog.Builder(this)
-                        .setView(full)
-                        .setPositiveButton("Закрыть",null).create();
-                    preview.show();
-                    if(preview.getWindow()!=null)
-                        preview.getWindow().setLayout(
-                            (int)(getResources().getDisplayMetrics().widthPixels*0.90),
-                            (int)(getResources().getDisplayMetrics().heightPixels*0.80));
-                });
+                still.setOnFocusChangeListener((v,focused)->MediaDesign.animateFocus(v,focused));
+                still.setOnClickListener(v->showFullPhoto(item,imageUrl));
             }
             gallery.addView(images);
-            root.addView(gallery,spaced(-1,tvLayout?147:119,0,15));
+            root.addView(gallery,spaced(-1,tvLayout?151:119,0,10));
         }
-
-        LinearLayout actions=line();
-        Button watch=accentButton(item.link().isEmpty()?
-            "Ссылка недоступна":"▶  Смотреть");
-        watch.setEnabled(!item.link().isEmpty());
-        watch.setAlpha(item.link().isEmpty()?0.55f:1f);
-        actions.addView(watch,new LinearLayout.LayoutParams(0,dp(52),1));
-        Button site=button("На сайте  ↗");
-        LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(0,dp(52),1);
-        sp.leftMargin=dp(10);
-        actions.addView(site,sp);
-        root.addView(actions,spaced(-1,55,0,8));
-        JSONObject record=favoriteRecord(item);
-        Button bookmark=button(favorites.contains(record)?
-            "★  Убрать из избранного":"☆  Добавить в избранное");
-        bookmark.setTextSize(15);
-        bookmark.setTextColor(MediaDesign.ACCENT_LIGHT);
-        root.addView(bookmark,spaced(-1,47,0,8));
-        bookmark.setOnClickListener(v->{
-            // Recreate from the latest item metadata so the saved poster and links stay current.
-            boolean added=favorites.toggle(favoriteRecord(item));
-            bookmark.setText(added?"★  Убрать из избранного":"☆  Добавить в избранное");
-            if(favoritesMode)main.post(this::openFavorites);
-        });
-        Button close=button("Закрыть карточку");
-        root.addView(close,lp(-1,45));
-
-        AlertDialog dlg=new AlertDialog.Builder(this).setView(scroll).create();
-        watch.setOnClickListener(v->{dlg.dismiss();play(item);});
-        site.setEnabled(!item.details.isEmpty());
-        site.setOnClickListener(v->{
-            if(item.details.isEmpty())return;
-            try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(item.details)));}
-            catch(Exception e){
-                Toast.makeText(this,"Не удалось открыть сайт: "+error(e),
-                    Toast.LENGTH_LONG).show();
-            }
-        });
-        close.setOnClickListener(v->dlg.dismiss());
-        dlg.show();
-        if(dlg.getWindow()!=null){
-            dlg.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
-            int width=Math.min(dp(contentWidth),
-                (int)(getResources().getDisplayMetrics().widthPixels*0.97));
-            dlg.getWindow().setLayout(width,
-                (int)(getResources().getDisplayMetrics().heightPixels*(tvLayout?0.88f:0.91f)));
-        }
-        if(tvLayout)(watch.isEnabled()?watch:site).post(
-            ()->(watch.isEnabled()?watch:site).requestFocus());
+        page.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        detailsPage=page;
+        fullPhotoPage=null;
+        setContentView(page);
+        if(tvLayout)(watch.isEnabled()?watch:bookmark).post(
+            ()->(watch.isEnabled()?watch:bookmark).requestFocus());
+    }
+    private void showFullPhoto(Item item,String photoUrl){
+        LinearLayout page=column();
+        page.setBackgroundColor(0xff03050c);
+        LinearLayout header=line();
+        header.setPadding(dp(12),dp(5),dp(12),dp(5));
+        Button back=button("‹  К фильму");
+        back.setTextSize(13);
+        back.setOnClickListener(v->onBackPressed());
+        header.addView(back,spaced(140,39,10,0));
+        TextView hint=label("Дополнительное фото  ·  Назад — вернуться",13,
+            MediaDesign.MUTED,false);
+        header.addView(hint,new LinearLayout.LayoutParams(0,dp(39),1));
+        page.addView(header,spaced(-1,50,0,0));
+        android.widget.FrameLayout imageHost=new android.widget.FrameLayout(this);
+        TextView loading=label("Загрузка изображения в полном размере…",14,
+            MediaDesign.MUTED,false);
+        loading.setGravity(Gravity.CENTER);
+        imageHost.addView(loading,new android.widget.FrameLayout.LayoutParams(-1,-1));
+        ImageView full=new ImageView(this);
+        full.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        imageHost.addView(full,new android.widget.FrameLayout.LayoutParams(-1,-1));
+        page.addView(imageHost,new LinearLayout.LayoutParams(-1,0,1));
+        fullPhotoPage=page;
+        setContentView(page);
+        loadImage(full,photoUrl,referer(item),null,false,true);
+        back.requestFocus();
     }
     private void play(Item item) {
         String server=prefs.getString("torr_url","http://127.0.0.1:8090");
@@ -2420,6 +2547,7 @@ public final class MainActivity extends Activity {
         main.removeCallbacks(carouselAdvance);
         featuredHost=null;
         serial++;worker.shutdownNow();metadataWorker.shutdownNow();
+        imageWorker.shutdownNow();fullImageWorker.shutdownNow();
         super.onDestroy();
     }
     private static String read(InputStream input) throws Exception {
