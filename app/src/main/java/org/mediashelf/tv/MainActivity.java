@@ -125,6 +125,14 @@ public final class MainActivity extends Activity {
     private final AtomicBoolean downloadBusy=new AtomicBoolean(false);
     private volatile HttpURLConnection activeDownloadConnection;
     private final Handler main = new Handler(Looper.getMainLooper());
+    private boolean exitPromptShown=false;
+    private boolean backHeld=false;
+    private boolean backDown=false;
+    private final Runnable showLongBackExit=()->{
+        if(!backDown || exitPromptShown || isFinishing())return;
+        backHeld=true;
+        confirmFullExit();
+    };
     private SharedPreferences prefs;
     private FavoritesStore favorites;
     private SavedSearches savedSearches;
@@ -695,6 +703,65 @@ public final class MainActivity extends Activity {
         updateFilters();
     }
 
+    /**
+     * TV remotes don't consistently dispatch onKeyLongPress(BACK).
+     * Track held key time at the Activity window boundary, while retaining
+     * normal short Back behavior including the gallery and sidebar.
+     */
+    @Override public boolean dispatchKeyEvent(android.view.KeyEvent event){
+        if(tvLayout && event.getKeyCode()==android.view.KeyEvent.KEYCODE_BACK){
+            if(event.getAction()==android.view.KeyEvent.ACTION_DOWN){
+                if(event.getRepeatCount()==0 && !backDown){
+                    backDown=true;
+                    backHeld=false;
+                    main.postDelayed(showLongBackExit,750L);
+                }
+                return true;
+            }
+            if(event.getAction()==android.view.KeyEvent.ACTION_UP){
+                main.removeCallbacks(showLongBackExit);
+                boolean wasHeld=backHeld;
+                backHeld=false;
+                backDown=false;
+                if(!wasHeld && !exitPromptShown && !event.isCanceled())
+                    onBackPressed();
+                return true;
+            }
+        }
+        return super.dispatchKeyEvent(event);
+    }
+    private void confirmFullExit(){
+        if(exitPromptShown)return;
+        exitPromptShown=true;
+        themedDialog().setTitle("Закрыть MediaShelf?")
+            .setMessage("Вы уверены, что хотите закрыть приложение? "+
+                "Текущие загрузки и подготовка видео будут остановлены. "+
+                "Сохранённые фильмы, поиски и настройки останутся.")
+            .setPositiveButton("Закрыть приложение",(d,w)->forceCloseMediaShelf())
+            .setNegativeButton("Отмена",(d,w)->exitPromptShown=false)
+            .setOnCancelListener(d->exitPromptShown=false)
+            .show();
+    }
+    private void forceCloseMediaShelf(){
+        // Stop active downloads before finishing. Only remove in-memory
+        // thumbnails; persisted movies and favorites remain untouched.
+        if(activeDownload!=null)activeDownload.set(false);
+        if(activeDownloadConnection!=null)activeDownloadConnection.disconnect();
+        if(pictureCache!=null)pictureCache.evictAll();
+        main.removeCallbacks(carouselAdvance);
+        main.removeCallbacks(showLongBackExit);
+        serial++;
+        worker.shutdownNow();
+        metadataWorker.shutdownNow();
+        searchMetadataWorker.shutdownNow();
+        imageWorker.shutdownNow();
+        fullImageWorker.shutdownNow();
+        finishAndRemoveTask();
+        // Explicit user-requested full exit (rather than Home/background).
+        // Android otherwise may keep a cached application process in RAM.
+        main.postDelayed(()->android.os.Process.killProcess(
+            android.os.Process.myPid()),220L);
+    }
     @Override public boolean onKeyDown(int keyCode,android.view.KeyEvent event){
         if(tvLayout && keyCode==android.view.KeyEvent.KEYCODE_MENU){
             setSidebarCollapsed(!sidebarCollapsed,true);
@@ -2039,7 +2106,8 @@ public final class MainActivity extends Activity {
         featuredLoading=isHomepage();
         pageInfo="";
         resetCatalogScroll=true;
-        message("Идёт поиск…");
+        message(q==null || q.trim().isEmpty()?
+            "Загружаем каталог…":"Поиск: «"+q.trim()+"»\nПолучаем результаты сайта…");
         final String api=prefs.getString("api_key","");
         final String base=prefs.getString("jackett_url","http://192.168.50.2:9117");
 
@@ -2224,23 +2292,31 @@ public final class MainActivity extends Activity {
             guidance.setPadding(dp(10),dp(14),dp(10),dp(12));
             cards.addView(guidance,spaced(-1,-2,0,12));
         }
-        if(items.isEmpty() && sitePageCursor==null && multiWordSession==null){
+        if(items.isEmpty()){
             LinearLayout state=column();
             state.setGravity(Gravity.CENTER);
             state.setPadding(dp(12),dp(33),dp(12),dp(33));
             TextView mark=label("⌕",44,0xff6d88b9,true);
             mark.setGravity(Gravity.CENTER);
             state.addView(mark);
-            TextView info=label(favoritesMode?"Избранное пока пусто":"Здесь пока нет раздач",20,MediaDesign.TEXT,true);
+            TextView info=label(favoritesMode?"Избранное пока пусто":
+                !lastQuery.trim().isEmpty()?"По этому запросу пока нет результатов":
+                "Здесь пока нет раздач",20,MediaDesign.TEXT,true);
             info.setGravity(Gravity.CENTER);
             state.addView(info,spaced(-1,50,0,2));
-            TextView help=label(favoritesMode?"Открой карточку и нажми ★ Добавить в избранное":
-                "Попробуй другое слово или выбери раздел сайта",13,
-                MediaDesign.MUTED,false);
+            TextView help=label(favoritesMode?
+                "Открой карточку и нажми ★ Добавить в избранное":
+                !lastQuery.trim().isEmpty()?
+                    "Запрос: «"+lastQuery+"». Попробуй другие слова, "+
+                    "следующую страницу или расширенный поиск.":
+                    "Попробуй другое слово или выбери раздел сайта",
+                13,MediaDesign.MUTED,false);
             help.setGravity(Gravity.CENTER);
             state.addView(help);
             cards.addView(state);
-            return;
+            // Even when no movies are found, keep access to a site's
+            // next page and the optional extended search below.
+            if(sitePageCursor==null && multiWordSession==null)return;
         }
         PosterGrid.Size geometry=PosterGrid.calculate(
             getResources().getConfiguration().screenWidthDp,
@@ -3603,7 +3679,11 @@ public final class MainActivity extends Activity {
     @Override protected void onDestroy() {
         dismissCardActionPopup();
         main.removeCallbacks(carouselAdvance);
+        main.removeCallbacks(showLongBackExit);
         featuredHost=null;
+        if(activeDownload!=null)activeDownload.set(false);
+        if(activeDownloadConnection!=null)activeDownloadConnection.disconnect();
+        pictureCache.evictAll();
         serial++;worker.shutdownNow();metadataWorker.shutdownNow();
         imageWorker.shutdownNow();fullImageWorker.shutdownNow();
         searchMetadataWorker.shutdownNow();
