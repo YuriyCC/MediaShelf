@@ -64,6 +64,12 @@ public final class MainActivity extends Activity {
     private LinearLayout sidebarPanel;
     private LinearLayout sidebarNavigation;
     private Button navHomeButton,navPopularButton,navSourceButton;
+    private Button navSectionsButton,navActiveCategoryButton;
+    private boolean sidebarSectionsExpanded=false;
+    private String sidebarFetchedSource="";
+    private boolean sidebarFetchingCategories=false;
+    private String sidebarCategoriesError="";
+    private final List<SourceRegistry.Category> sidebarFetchedCategories=new ArrayList<>();
     private TextView currentSectionLabel;
     private boolean sidebarCollapsed;
     private int sidebarWidthDp;
@@ -434,6 +440,7 @@ public final class MainActivity extends Activity {
         tvLayout=hardwareTv || tvPreviewMode ||
             (screenWidthDp>=840 && screenHeightDp>=550);
         sidebarCollapsed=tvLayout && prefs.getBoolean("sidebar_hidden",true);
+        sidebarSectionsExpanded=prefs.getBoolean("sections_expanded",currentCategory>0);
         sidebarWidthDp=compactTvPreview?
             Math.max(120,Math.min(146,screenWidthDp/5)):176;
         sidebarPanel=null;
@@ -701,7 +708,11 @@ public final class MainActivity extends Activity {
             load("","popular");
         },lastQuery.isEmpty()&&currentCategory==0&&
             lastSort.equals("popular"));
-        addSidebarEntry("▦","Разделы",()->categories(),currentCategory>0);
+        navSectionsButton=addSidebarEntry(
+            sidebarSectionsExpanded && !sidebarCollapsed?"▾":"▦",
+            "Разделы",()->toggleSidebarSections(),currentCategory>0);
+        if(sidebarSectionsExpanded && !sidebarCollapsed)
+            renderInlineSidebarSections();
         navSourceButton=addSidebarEntry("◈","Источники",
             ()->chooseSource(),false);
         bannerSettingsButton=addSidebarEntry("✦","Баннер",
@@ -710,6 +721,134 @@ public final class MainActivity extends Activity {
         addSidebarEntry("◇","Проверка",()->diagnostics(),false);
         if(tvPreviewMode)addSidebarEntry("⇄","Режим телефона",
             ()->toggleTvPreview(),false);
+    }
+
+    /**
+     * TV categories are children of the sidebar entry, not a blocking dialog.
+     * On a phone the existing category selection screen remains unchanged.
+     */
+    private void toggleSidebarSections(){
+        if(!tvLayout){categories();return;}
+        if(sidebarCollapsed){
+            sidebarSectionsExpanded=true;
+            prefs.edit().putBoolean("sections_expanded",true).apply();
+            setSidebarCollapsed(false,true);
+            return;
+        }
+        sidebarSectionsExpanded=!sidebarSectionsExpanded;
+        prefs.edit().putBoolean("sections_expanded",sidebarSectionsExpanded).apply();
+        renderSidebarNavigation();
+        if(navSectionsButton!=null)navSectionsButton.requestFocus();
+    }
+    private void inlineSidebarNotice(String text){
+        TextView notice=label(text,compactTvPreview?10:11,MediaDesign.MUTED,false);
+        notice.setPadding(dp(compactTvPreview?13:19),dp(5),dp(5),dp(9));
+        sidebarNavigation.addView(notice,lp(-1,-2));
+    }
+    private String inlineCategoryLabel(SourceRegistry.Category category){
+        if(activeSource.equals("xxxclub")){
+            switch(category.id){
+                case 6090:return "Фильмы";
+                case 10001:return "720p";
+                case 10002:return "1080p";
+                case 6045:return "4K";
+                case 6080:return "480p";
+                case 6050:return "Сборники";
+                case 6060:return "Фото";
+                case 6070:return "VR";
+            }
+        }
+        return category.name;
+    }
+    private void inlineCategoryEntry(String text,int code){
+        boolean active=lastQuery.isEmpty() && currentCategory==code;
+        Button entry=addSidebarEntry("›",text,()->{
+            currentCategory=code;
+            currentCategoryLabel=code==0?"":text;
+            if(queryInput!=null)queryInput.setText("");
+            load("","latest");
+            renderSidebarNavigation();
+            if(navActiveCategoryButton!=null)navActiveCategoryButton.requestFocus();
+        },active);
+        entry.setPadding(dp(compactTvPreview?13:22),0,dp(4),0);
+        entry.setTextSize(compactTvPreview?10:12);
+        if(active)navActiveCategoryButton=entry;
+    }
+    private void renderInlineSidebarSections(){
+        navActiveCategoryButton=null;
+        if(activeSource.equals("all")){
+            inlineSidebarNotice("Выбери конкретный сайт в «Источники»: категории у сайтов разные.");
+            return;
+        }
+        SiteCatalog.Site site=SiteCatalog.byId(activeSource);
+        if(site!=null && !site.direct &&
+            prefs.getString("api_key","").isEmpty()){
+            inlineSidebarNotice("Для этого сайта требуется настройка Jackett или прямой модуль.");
+            return;
+        }
+        List<SourceRegistry.Category> list=IndexerCapabilities.known(activeSource);
+        if(list.isEmpty()){
+            SourceRegistry.Source source=SourceRegistry.byId(sources,activeSource);
+            if(source!=null && !source.categories.isEmpty())
+                list=new ArrayList<>(source.categories);
+        }
+        if(list.isEmpty() && activeSource.equals(sidebarFetchedSource))
+            list=new ArrayList<>(sidebarFetchedCategories);
+        if(list.isEmpty()){
+            inlineSidebarNotice(sidebarFetchingCategories &&
+                activeSource.equals(sidebarFetchedSource)?
+                "Загружаем категории…":
+                !sidebarCategoriesError.isEmpty() &&
+                activeSource.equals(sidebarFetchedSource)?
+                sidebarCategoriesError:"Получаем категории сайта…");
+            fetchInlineSidebarSections(activeSource);
+            return;
+        }
+        inlineCategoryEntry("Все категории",0);
+        for(SourceRegistry.Category category:list)
+            inlineCategoryEntry(inlineCategoryLabel(category),category.id);
+    }
+    private void fetchInlineSidebarSections(String id){
+        if(id.equals("all") ||
+            (sidebarFetchingCategories && id.equals(sidebarFetchedSource)) ||
+            (!sidebarCategoriesError.isEmpty() && id.equals(sidebarFetchedSource)) ||
+            (id.equals(sidebarFetchedSource) && !sidebarFetchedCategories.isEmpty()))
+            return;
+        if(prefs.getString("api_key","").isEmpty()){
+            sidebarFetchedSource=id;
+            sidebarCategoriesError="Для категорий нужен Jackett.";
+            return;
+        }
+        sidebarFetchedSource=id;
+        sidebarFetchingCategories=true;
+        sidebarCategoriesError="";
+        sidebarFetchedCategories.clear();
+        String base=prefs.getString("jackett_url","http://192.168.50.2:9117");
+        String key=prefs.getString("api_key","");
+        worker.execute(()->{
+            List<SourceRegistry.Category> fetched=new ArrayList<>();
+            String error="";
+            try{
+                fetched=IndexerCapabilities.fetch(base,key,id);
+                if(fetched.isEmpty())error="Сайт не объявляет категории через Jackett.";
+            }catch(Exception exception){
+                error="Категории недоступны. Поиск работает отдельно.";
+            }
+            final List<SourceRegistry.Category> result=fetched;
+            final String message=error;
+            main.post(()->{
+                if(isFinishing()||!sidebarFetchedSource.equals(id))return;
+                sidebarFetchingCategories=false;
+                sidebarFetchedCategories.clear();
+                sidebarFetchedCategories.addAll(result);
+                sidebarCategoriesError=message;
+                if(tvLayout && !sidebarCollapsed && sidebarSectionsExpanded &&
+                    activeSource.equals(id)){
+                    renderSidebarNavigation();
+                    if(navSectionsButton!=null)navSectionsButton.requestFocus();
+                }
+            });
+        });
     }
 
     @Override public void onBackPressed(){
@@ -735,9 +874,15 @@ public final class MainActivity extends Activity {
                 if(isFinishing())return;
                 show(catalogItems);
                 catalogScroll.post(()->catalogScroll.scrollTo(0,previousScroll));
-                if(sidebarToggleButton!=null)sidebarToggleButton.requestFocus();
+                Button target=(!hide && sidebarSectionsExpanded && navSectionsButton!=null)?
+                    navSectionsButton:sidebarToggleButton;
+                if(target!=null)target.requestFocus();
             });
-        }else if(sidebarToggleButton!=null)sidebarToggleButton.requestFocus();
+        }else{
+            Button target=(!hide && sidebarSectionsExpanded && navSectionsButton!=null)?
+                navSectionsButton:sidebarToggleButton;
+            if(target!=null)target.requestFocus();
+        }
     }
     private void updateFilters(){
         boolean nativeSource=activeSource.equals("xxxclub")||activeSource.equals("all");
@@ -990,6 +1135,7 @@ public final class MainActivity extends Activity {
         currentCategoryLabel="";
         prefs.edit().putString("indexer",id).apply();
         refreshSourceMenu();
+        if(tvLayout && sidebarNavigation!=null)renderSidebarNavigation();
         updateFilters();
         load(lastQuery,lastSort);
     }
