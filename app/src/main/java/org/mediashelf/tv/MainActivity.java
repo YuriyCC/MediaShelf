@@ -102,7 +102,10 @@ public final class MainActivity extends Activity {
     private String pageInfo="";
     private ScrollView catalogScroll;
     private final ExecutorService worker = Executors.newFixedThreadPool(4);
-    private final ExecutorService metadataWorker = Executors.newFixedThreadPool(3);
+    private final ExecutorService metadataWorker = Executors.newFixedThreadPool(4);
+    private final java.util.Set<Item> pendingPosterMetadata=
+        java.util.Collections.newSetFromMap(
+            new java.util.concurrent.ConcurrentHashMap<Item,Boolean>());
     private static final int IMAGE_REQUEST_TAG=0x7f0e0012;
     private final ExecutorService imageWorker = Executors.newFixedThreadPool(5);
     private final ExecutorService fullImageWorker = Executors.newSingleThreadExecutor();
@@ -702,9 +705,70 @@ public final class MainActivity extends Activity {
             canvas.restore();
         }
     }
+    /** A vector is drawn at the precise button centre, independently of glyph metrics. */
+    private static class CenterIconButton extends Button {
+        private Drawable symbol;
+        private final int iconDp;
+        CenterIconButton(android.content.Context context,Drawable image,int sizeDp){
+            super(context);
+            symbol=image;
+            iconDp=sizeDp;
+            setAllCaps(false);
+            setText("");
+            setMinHeight(0);setMinimumHeight(0);
+        }
+        void replaceIcon(Drawable image){symbol=image;invalidate();}
+        @Override protected void onDraw(Canvas canvas){
+            super.onDraw(canvas);
+            if(symbol==null)return;
+            int size=(int)(getResources().getDisplayMetrics().density*iconDp+0.5f);
+            int left=(getWidth()-size)/2;
+            int top=(getHeight()-size)/2;
+            symbol.setBounds(left,top,left+size,top+size);
+            symbol.draw(canvas);
+        }
+    }
+    private CenterIconButton actionSymbol(int resId,boolean primary){
+        CenterIconButton b=new CenterIconButton(this,getDrawable(resId),primary?26:27);
+        b.setFocusable(true);
+        b.setBackground(primary?
+            MediaDesign.gradient(this,new int[]{0xffb65cff,0xff7529dc},12):
+            MediaDesign.round(this,0xff28334e,12));
+        b.setOnFocusChangeListener((v,focused)->{
+            b.setBackground(focused?
+                MediaDesign.outlined(this,primary?0xff8d42dc:0xff38255a,
+                    MediaDesign.ACCENT_LIGHT,12,2):
+                primary?MediaDesign.gradient(this,
+                    new int[]{0xffb65cff,0xff7529dc},12):
+                    MediaDesign.round(this,0xff28334e,12));
+        });
+        return b;
+    }
+    private final class FlameNavigationButton extends Button {
+        private final Drawable icon;
+        FlameNavigationButton(){
+            super(MainActivity.this);
+            icon=getDrawable(R.drawable.ic_flame).mutate();
+            popularFlameIcon=icon;
+            setText(sidebarCollapsed?"":"     Популярное");
+            setAllCaps(false);
+            setMinHeight(0);setMinimumHeight(0);
+            setFocusable(true);
+        }
+        @Override protected void onDraw(Canvas canvas){
+            super.onDraw(canvas);
+            int size=dp(17);
+            int left=sidebarCollapsed?(getWidth()-size)/2:getPaddingLeft()+dp(1);
+            int top=(getHeight()-size)/2;
+            icon.setBounds(left,top,left+size,top+size);
+            icon.draw(canvas);
+        }
+    }
     private Button addSidebarEntry(String symbol,String label,
         Runnable action,boolean active){
-        Button b=button(sidebarCollapsed?symbol:symbol+"   "+label);
+        Button b=label.equals("Популярное")?
+            new FlameNavigationButton():
+            button(sidebarCollapsed?symbol:symbol+"   "+label);
         b.setTextSize(sidebarCollapsed?
             (compactTvPreview?17:20):(compactTvPreview?11:14));
         b.setGravity(sidebarCollapsed?Gravity.CENTER:
@@ -787,21 +851,10 @@ public final class MainActivity extends Activity {
             load("","popular");
         },!favoritesMode&&lastQuery.isEmpty()&&currentCategory==0&&
             lastSort.equals("popular"));
-        // Do not use setCompoundDrawables: it sticks to the LEFT of the button
-        // even when Gravity.CENTER is set. Put the vector into centered text.
-        popularFlameIcon=getDrawable(R.drawable.ic_flame).mutate();
-        popularFlameIcon.setTint(lastQuery.isEmpty()&&currentCategory==0&&
+        if(popularFlameIcon!=null)popularFlameIcon.setTint(
+            lastQuery.isEmpty()&&currentCategory==0&&
             lastSort.equals("popular")&&!favoritesMode?
-            MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
-        int flameDp=dp(16);
-        popularFlameIcon.setBounds(0,0,flameDp,flameDp);
-        SpannableString popularText=new SpannableString(sidebarCollapsed?
-            "\uFFFC":"\uFFFC   Популярное");
-        popularText.setSpan(new CenteredDrawableSpan(popularFlameIcon),0,1,
-            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        navPopularButton.setText(popularText);
-        navPopularButton.setGravity(sidebarCollapsed?Gravity.CENTER:
-            Gravity.CENTER_VERTICAL|Gravity.LEFT);
+                MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
         navFavoritesButton=addSidebarEntry("★","Избранное",
             ()->openFavorites(),favoritesMode);
         navSectionsButton=addSidebarEntry(
@@ -1828,8 +1881,11 @@ public final class MainActivity extends Activity {
                 MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
             navPopularButton.setTextColor(popular?
                 MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
-            if(popularFlameIcon!=null)popularFlameIcon.setTint(popular?
-                MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
+            if(popularFlameIcon!=null){
+                popularFlameIcon.setTint(popular?
+                    MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
+                navPopularButton.invalidate();
+            }
         }
         final String source=activeSource;
         final String providerQuery=SearchTerms.upstreamQuery(q);
@@ -2130,7 +2186,9 @@ public final class MainActivity extends Activity {
                 cover.addView(seeds,seedParams);
             }
             tile.addView(cover,lp(-1,coverHeight));
-            loadPoster(image,item,i<24);
+            // Every currently shown card is eligible for its original poster.
+            // Network work is deduplicated and performed off the UI thread.
+            loadPoster(image,item,true);
 
             TextView title=label(item.title,
                 compactTvPreview?10:tvLayout?12:13,
@@ -2494,14 +2552,17 @@ public final class MainActivity extends Activity {
         if(prefetch && SiteDetails.supported(item))refreshMetadata(item,view);
     }
     private void refreshMetadata(Item item, ImageView image) {
-        if(!SiteDetails.supported(item) || item.detailsFetched) return;
-        metadataWorker.execute(() -> {
-            SiteDetails.enrich(item);
-            main.post(() -> {
-                if(isFinishing())return;
-                if(image != null && image.getTag()==item && !item.poster.isEmpty())
-                    loadImage(image,item.poster,referer(item),item,false);
-            });
+        if(!SiteDetails.supported(item) || item.detailsFetched ||
+            !pendingPosterMetadata.add(item))return;
+        metadataWorker.execute(()->{
+            try{
+                SiteDetails.enrich(item);
+                main.post(()->{
+                    if(isFinishing())return;
+                    if(image!=null && image.getTag()==item && !item.poster.isEmpty())
+                        loadImage(image,item.poster,referer(item),item,false);
+                });
+            }finally{pendingPosterMetadata.remove(item);}
         });
     }
     private void loadImage(ImageView view,String link,String referer,Item item,boolean fallBackToDetails){
@@ -2713,18 +2774,15 @@ public final class MainActivity extends Activity {
         LinearLayout actions=line();
         actions.setClipChildren(false);
         actions.setGravity(Gravity.LEFT|Gravity.CENTER_VERTICAL);
-        Button watch=accentButton("▶");
-        watch.setGravity(Gravity.CENTER);
-        watch.setTextSize(tvLayout?19:16);
+        CenterIconButton watch=actionSymbol(R.drawable.ic_play_action,true);
         watch.setContentDescription("Смотреть");
         watch.setEnabled(!item.link().isEmpty());
         watch.setAlpha(watch.isEnabled()?1:0.55f);
         actions.addView(watch,spaced(tvLayout?54:49,44,0,0));
 
         JSONObject record=favoriteRecord(item);
-        Button bookmark=button(favorites.contains(record)?"★":"☆");
-        bookmark.setGravity(Gravity.CENTER);
-        bookmark.setTextSize(tvLayout?20:17);
+        CenterIconButton bookmark=actionSymbol(favorites.contains(record)?
+            R.drawable.ic_star_filled_action:R.drawable.ic_star_outline_action,false);
         bookmark.setContentDescription(favorites.contains(record)?
             "Убрать из избранного":"Добавить в избранное");
         bookmark.setTextColor(MediaDesign.ACCENT_LIGHT);
@@ -2771,7 +2829,8 @@ public final class MainActivity extends Activity {
         watch.setOnClickListener(v->play(item));
         bookmark.setOnClickListener(v->{
             boolean saved=favorites.toggle(favoriteRecord(item));
-            bookmark.setText(saved?"★":"☆");
+            bookmark.replaceIcon(getDrawable(saved?
+                R.drawable.ic_star_filled_action:R.drawable.ic_star_outline_action));
             bookmark.setContentDescription(saved?
                 "Убрать из избранного":"Добавить в избранное");
         });
