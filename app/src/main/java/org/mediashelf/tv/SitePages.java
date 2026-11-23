@@ -85,8 +85,34 @@ final class SitePages {
             cursor.visited.remove(request); // allow user to retry a temporary error
             throw e;
         }
-        if(doc.select("div.browsetableinside,div.divtableinside").isEmpty())
-            throw new IllegalStateException("XXXClub изменил разметку или вернул защитную страницу");
+        // A site's search must not silently redirect to an unrelated browse
+        // page: that looks like the previous catalog even though a new query
+        // was entered. Treat it as a source error, not a successful search.
+        if(request.contains("/torrents/search/")){
+            URI loaded=new URI(doc.location());
+            if(!safeUrl(doc.location()) ||
+                loaded.getPath()==null ||
+                !loaded.getPath().startsWith("/torrents/search/"))
+                throw new IllegalStateException(
+                    "XXXClub перенаправил поисковый запрос вместо выдачи");
+        }
+        if(doc.select("div.browsetableinside,div.divtableinside").isEmpty()){
+            String visible=doc.text().toLowerCase(Locale.ROOT);
+            if(request.contains("/torrents/search/") &&
+               (visible.contains("no results found") ||
+                visible.contains("no torrents found") ||
+                visible.contains("nothing found") ||
+                visible.contains("no matching torrents"))){
+                cursor.pageIndex++;
+                cursor.finished=true;
+                cursor.url=null;
+                return new Page(new ArrayList<>(),
+                    "На сайте нет результатов по этому запросу.",
+                    cursor.pageIndex,false);
+            }
+            throw new IllegalStateException(
+                "XXXClub не вернул каталог: возможно, изменена разметка или включена защита");
+        }
         List<MainActivity.Item> results=new ArrayList<>();
         Set<String> urls=new HashSet<>();
         Elements rows=doc.select("div.browsetableinside > ul > li,div.divtableinside > ul > li");
