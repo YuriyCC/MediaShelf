@@ -142,7 +142,11 @@ final class SiteDetails {
             for(int i=options.length-1;i>=0;i--){
                 String[] parts=options[i].trim().split("\\s+");
                 if(parts.length>0){
-                    String url=picture.absUrl(parts[0]);
+                    String url=parts[0];
+                    if(!validImageUrl(url)){
+                        try{url=new URL(new URL(picture.baseUri()),url).toString();}
+                        catch(Exception ignored){continue;}
+                    }
                     if(validImageUrl(url))return url;
                 }
             }
