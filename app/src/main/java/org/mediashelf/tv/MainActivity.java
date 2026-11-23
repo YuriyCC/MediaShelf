@@ -64,7 +64,7 @@ public final class MainActivity extends Activity {
     private Button sidebarToggleButton;
     private LinearLayout sidebarPanel;
     private LinearLayout sidebarNavigation;
-    private Button navHomeButton,navPopularButton,navSourceButton;
+    private Button navHomeButton,navPopularButton,navSourceButton,navFavoritesButton;
     private Button navSectionsButton,navActiveCategoryButton;
     private boolean sidebarSectionsExpanded=false;
     private String sidebarFetchedSource="";
@@ -95,6 +95,8 @@ public final class MainActivity extends Activity {
     private final ExecutorService metadataWorker = Executors.newFixedThreadPool(3);
     private final Handler main = new Handler(Looper.getMainLooper());
     private SharedPreferences prefs;
+    private FavoritesStore favorites;
+    private boolean favoritesMode=false;
     private LinearLayout cards;
     private TextView status;
     private EditText queryInput;
@@ -154,6 +156,7 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
         prefs=getSharedPreferences("local_settings",MODE_PRIVATE);
+        favorites=new FavoritesStore(prefs);
         int mode=getResources().getConfiguration().uiMode &
             android.content.res.Configuration.UI_MODE_TYPE_MASK;
         hardwareTv=mode==android.content.res.Configuration.UI_MODE_TYPE_TELEVISION;
@@ -164,6 +167,7 @@ public final class MainActivity extends Activity {
         if(activeSource.isEmpty())activeSource="xxxclub";
         if(saved!=null){
             lastQuery=saved.getString("last_query","");
+            favoritesMode=saved.getBoolean("favorites_mode",false);
             lastSort=saved.getString("last_sort","latest");
             currentCategory=saved.getInt("current_category",0);
             currentCategoryLabel=saved.getString("category_label","");
@@ -171,10 +175,12 @@ public final class MainActivity extends Activity {
         ui();
         if(queryInput!=null && !lastQuery.isEmpty())queryInput.setText(lastQuery);
         if(!prefs.getString("api_key","").isEmpty())loadSources();
-        load(lastQuery,lastSort);
+        if(favoritesMode)openFavorites();
+        else load(lastQuery,lastSort);
     }
     @Override protected void onSaveInstanceState(Bundle out){
         out.putString("last_query",lastQuery);
+        out.putBoolean("favorites_mode",favoritesMode);
         out.putString("last_sort",lastSort);
         out.putInt("current_category",currentCategory);
         out.putString("category_label",currentCategoryLabel);
@@ -635,7 +641,7 @@ public final class MainActivity extends Activity {
         SiteCatalog.Site site=SiteCatalog.byId(activeSource);
         String src=activeSource.equals("all")?"Все сайты":
             site!=null?site.title:activeSource;
-        String section=!lastQuery.isEmpty()?"Поиск: "+lastQuery:
+        String section=favoritesMode?"Избранное":!lastQuery.isEmpty()?"Поиск: "+lastQuery:
             currentCategory>0?currentCategoryLabel:
             lastSort.equals("popular")?"Популярное":"Новинки";
         currentSectionLabel.setText(src+"   /   "+section);
@@ -713,14 +719,16 @@ public final class MainActivity extends Activity {
             currentCategory=0;currentCategoryLabel="";
             if(queryInput!=null)queryInput.setText("");
             load("","latest");
-        },lastQuery.isEmpty()&&currentCategory==0&&
+        },!favoritesMode&&lastQuery.isEmpty()&&currentCategory==0&&
             !lastSort.equals("popular"));
-        navPopularButton=addSidebarEntry("★","Популярное",()->{
+        navPopularButton=addSidebarEntry("▥","Популярное",()->{
             currentCategory=0;currentCategoryLabel="";
             if(queryInput!=null)queryInput.setText("");
             load("","popular");
-        },lastQuery.isEmpty()&&currentCategory==0&&
+        },!favoritesMode&&lastQuery.isEmpty()&&currentCategory==0&&
             lastSort.equals("popular"));
+        navFavoritesButton=addSidebarEntry("★","Избранное",
+            ()->openFavorites(),favoritesMode);
         navSectionsButton=addSidebarEntry(
             sidebarSectionsExpanded && !sidebarCollapsed?"▾":"▦",
             "Разделы",()->toggleSidebarSections(),currentCategory>0);
@@ -1408,7 +1416,46 @@ public final class MainActivity extends Activity {
         empty.addView(detail);
         cards.addView(empty,lp(-1,tvLayout?230:195));
     }
+    private void openFavorites(){
+        favoritesMode=true;
+        ++serial; // invalidate any running tracker request
+        sitePageCursor=null;
+        loadingNextPage=false;
+        visibleCount=60;
+        lastQuery="";
+        if(queryInput!=null)queryInput.setText("");
+        currentCategory=0;
+        currentCategoryLabel="";
+        main.removeCallbacks(carouselAdvance);
+        featuredItems.clear();
+        featuredHost=null;
+        catalogItems.clear();
+        for(JSONObject saved:favorites.all())catalogItems.add(new Item(saved));
+        pageInfo="";
+        if(status!=null)status.setText("Избранное · "+catalogItems.size());
+        updateCurrentSection();
+        if(tvLayout&&sidebarNavigation!=null)renderSidebarNavigation();
+        if(catalogScroll!=null)catalogScroll.scrollTo(0,0);
+        show(catalogItems);
+    }
+    private JSONObject favoriteRecord(Item item){
+        JSONObject record=new JSONObject();
+        try{
+            record.put("Title",item.title);
+            record.put("Tracker",item.tracker);
+            record.put("Details",item.details);
+            record.put("MagnetUri",item.magnet);
+            record.put("Link",item.download);
+            record.put("Poster",item.poster);
+            record.put("Description",item.description);
+            record.put("PublishDate",item.date);
+            record.put("Size",item.bytes);
+            record.put("Seeders",item.seeders);
+        }catch(org.json.JSONException ignored){}
+        return record;
+    }
     private void load(String q,String order) {
+        favoritesMode=false;
         lastQuery=q;
         lastSort=order;
         focusItemAfterLoad=-1;
@@ -1559,17 +1606,17 @@ public final class MainActivity extends Activity {
         cards.removeAllViews();
         featuredHost=null;
 
-        if(!items.isEmpty() && isHomepage())
+        if(!favoritesMode && !items.isEmpty() && isHomepage())
             addFeaturedCarousel();
 
         LinearLayout heading=line();
         LinearLayout left=column();
-        String category=currentCategory>0?
+        String category=favoritesMode?"ИЗБРАННОЕ":currentCategory>0?
             currentCategoryLabel:lastQuery.isEmpty()?
                 lastSort.equals("popular")?"ПОПУЛЯРНОЕ":"НОВЫЕ РАЗДАЧИ":
                 "ПОИСК ПО КАТАЛОГУ";
         if(!tvLayout)left.addView(eyebrow(category.toUpperCase(Locale.ROOT)));
-        TextView caption=label(lastQuery.isEmpty()?
+        TextView caption=label(favoritesMode?"Избранное":lastQuery.isEmpty()?
                 (currentCategory>0?currentCategoryLabel:
                     lastSort.equals("popular")?"Популярное":"Новинки"):
                 "Поиск: "+lastQuery,tvLayout?17:19,MediaDesign.TEXT,true);
@@ -1604,10 +1651,11 @@ public final class MainActivity extends Activity {
             TextView mark=label("⌕",44,0xff6d88b9,true);
             mark.setGravity(Gravity.CENTER);
             state.addView(mark);
-            TextView info=label("Здесь пока нет раздач",20,MediaDesign.TEXT,true);
+            TextView info=label(favoritesMode?"Избранное пока пусто":"Здесь пока нет раздач",20,MediaDesign.TEXT,true);
             info.setGravity(Gravity.CENTER);
             state.addView(info,spaced(-1,50,0,2));
-            TextView help=label("Попробуй другое слово или выбери раздел сайта",13,
+            TextView help=label(favoritesMode?"Открой карточку и нажми ★ Добавить в избранное":
+                "Попробуй другое слово или выбери раздел сайта",13,
                 MediaDesign.MUTED,false);
             help.setGravity(Gravity.CENTER);
             state.addView(help);
@@ -2205,6 +2253,18 @@ public final class MainActivity extends Activity {
         sp.leftMargin=dp(10);
         actions.addView(site,sp);
         root.addView(actions,spaced(-1,55,0,8));
+        JSONObject record=favoriteRecord(item);
+        Button bookmark=button(favorites.contains(record)?
+            "★  Убрать из избранного":"☆  Добавить в избранное");
+        bookmark.setTextSize(15);
+        bookmark.setTextColor(MediaDesign.ACCENT_LIGHT);
+        root.addView(bookmark,spaced(-1,47,0,8));
+        bookmark.setOnClickListener(v->{
+            // Recreate from the latest item metadata so the saved poster and links stay current.
+            boolean added=favorites.toggle(favoriteRecord(item));
+            bookmark.setText(added?"★  Убрать из избранного":"☆  Добавить в избранное");
+            if(favoritesMode)main.post(this::openFavorites);
+        });
         Button close=button("Закрыть карточку");
         root.addView(close,lp(-1,45));
 
