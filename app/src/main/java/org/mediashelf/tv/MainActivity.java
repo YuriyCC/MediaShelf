@@ -108,6 +108,7 @@ public final class MainActivity extends Activity {
     private View catalogPage;
     private View detailsPage;
     private View fullPhotoPage;
+    private View galleryReturnFocus;
     private PopupWindow cardActionPopup;
     private View cardReturnFocus;
     private int cardReturnScroll;
@@ -946,7 +947,16 @@ public final class MainActivity extends Activity {
     @Override public void onBackPressed(){
         if(fullPhotoPage!=null){
             fullPhotoPage=null;
-            if(detailsPage!=null)setContentView(detailsPage);
+            if(detailsPage!=null){
+                setContentView(detailsPage);
+                if(galleryReturnFocus!=null){
+                    View previous=galleryReturnFocus;
+                    previous.post(()->{
+                        if(detailsPage!=null && previous.isAttachedToWindow())
+                            previous.requestFocus();
+                    });
+                }
+            }
             return;
         }
         if(detailsPage!=null){
@@ -2670,6 +2680,7 @@ public final class MainActivity extends Activity {
     }
 
     private void showFullPhoto(Item item,String photoUrl){
+        galleryReturnFocus=getCurrentFocus();
         LinearLayout page=column();
         page.setBackgroundColor(0xff03050c);
         LinearLayout header=line();
