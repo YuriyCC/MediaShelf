@@ -29,6 +29,7 @@ import android.widget.GridLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.SeekBar;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -107,6 +108,14 @@ public final class MainActivity extends Activity {
         d.setColor(bg); d.setCornerRadius(dp(14));
         if (focus) d.setStroke(dp(2), BLUE);
         return d;
+    }
+    private ImageView mediaShelfLogo(){
+        ImageView logo=new ImageView(this);
+        logo.setImageResource(R.drawable.mediashelf_icon);
+        logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        logo.setFocusable(false);
+        logo.setContentDescription("MediaShelf");
+        return logo;
     }
     private TextView label(String text, int size, int color, boolean bold) {
         TextView v = new TextView(this);
@@ -490,6 +499,7 @@ public final class MainActivity extends Activity {
             LinearLayout heading=column();
             heading.addView(label("MediaShelf",22,MediaDesign.TEXT,true));
             heading.addView(eyebrow("КАТАЛОГ  /  18+"));
+            header.addView(mediaShelfLogo(),spaced(54,54,0,0));
             header.addView(heading,new LinearLayout.LayoutParams(0,dp(60),1));
             sourceSelector=button("XXXClub ▾");
             sourceSelector.setTextSize(12);
@@ -694,6 +704,9 @@ public final class MainActivity extends Activity {
         divider.setBackgroundColor(0xff30284a);
         sidebarNavigation.addView(divider,spaced(-1,1,0,
             compactTvPreview?5:11));
+        // Brand mark in the expanded TV rail; omit in compact preview to keep navigation visible.
+        if(!sidebarCollapsed && !compactTvPreview)
+            sidebarNavigation.addView(mediaShelfLogo(),spaced(-1,102,0,8));
         topSearchButton=addSidebarEntry("⌕","Поиск",
             ()->openSearchDialog(),false);
         navHomeButton=addSidebarEntry("⌂","Новинки",()->{
@@ -1386,9 +1399,7 @@ public final class MainActivity extends Activity {
         empty.setBackground(MediaDesign.gradient(this,
             new int[]{0xff1b2941,0xff131b2b},22));
         empty.setPadding(dp(18),dp(28),dp(18),dp(32));
-        TextView emblem=label("◌",35,MediaDesign.ACCENT,true);
-        emblem.setGravity(Gravity.CENTER);
-        empty.addView(emblem,spaced(-1,57,0,2));
+        empty.addView(mediaShelfLogo(),spaced(-1,85,0,6));
         TextView head=label("MediaShelf",19,MediaDesign.TEXT,true);
         head.setGravity(Gravity.CENTER);
         empty.addView(head,spaced(-1,31,0,5));
@@ -1605,7 +1616,8 @@ public final class MainActivity extends Activity {
         }
         PosterGrid.Size geometry=PosterGrid.calculate(
             getResources().getConfiguration().screenWidthDp,
-            sidebarWidthDp,sidebarCollapsed,compactTvPreview,tvLayout);
+            sidebarWidthDp,sidebarCollapsed,compactTvPreview,tvLayout,
+            prefs.getInt("poster_columns",0));
         int spacing=geometry.spacingDp;
         int columns=geometry.columns;
         int cardWidth=geometry.cardDp;
@@ -2252,6 +2264,75 @@ public final class MainActivity extends Activity {
         parent.addView(field,lp(-1,49));return field;
     }
     private void settings(boolean first) {
+        LinearLayout root=column();
+        root.setPadding(dp(20),dp(12),dp(20),dp(18));
+        ImageView brand=mediaShelfLogo();
+        root.addView(brand,spaced(-1,tvLayout?98:80,0,9));
+        TextView heading=label("ВНЕШНИЙ ВИД",15,MediaDesign.ACCENT_LIGHT,true);
+        root.addView(heading,spaced(-1,27,0,3));
+        TextView description=label("Количество постеров в одном ряду. Их размер подстроится автоматически под ширину телевизора.",13,MediaDesign.MUTED,false);
+        root.addView(description,spaced(-1,-2,0,9));
+        TextView amount=label("",15,MediaDesign.TEXT,true);
+        root.addView(amount,spaced(-1,29,0,0));
+        SeekBar columns=new SeekBar(this);
+        columns.setMax(8); // 0 = automatic, 1...8 = 3...10 columns
+        columns.setProgress(Math.max(0,Math.min(8,
+            prefs.getInt("poster_columns",0)==0?0:prefs.getInt("poster_columns",0)-2)));
+        columns.setProgressTintList(android.content.res.ColorStateList.valueOf(MediaDesign.ACCENT));
+        columns.setThumbTintList(android.content.res.ColorStateList.valueOf(MediaDesign.ACCENT_LIGHT));
+        columns.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+            @Override public void onProgressChanged(SeekBar bar,int progress,boolean fromUser){
+                int count=progress==0?0:progress+2;
+                amount.setText(count==0?"Размер: автоматически":"Плиток в ряд: "+count);
+            }
+            @Override public void onStartTrackingTouch(SeekBar bar){}
+            @Override public void onStopTrackingTouch(SeekBar bar){}
+        });
+        amount.setText(columns.getProgress()==0?
+            "Размер: автоматически":"Плиток в ряд: "+(columns.getProgress()+2));
+        root.addView(columns,spaced(-1,42,0,7));
+        Button automatic=button("Вернуть автоматический размер");
+        automatic.setTextSize(12);
+        automatic.setOnClickListener(v->columns.setProgress(0));
+        root.addView(automatic,spaced(-1,42,0,14));
+        TextView connectHead=label("ПОДКЛЮЧЕНИЯ",15,MediaDesign.ACCENT_LIGHT,true);
+        root.addView(connectHead,spaced(-1,28,0,4));
+        Button connect=button("TorrServer и Jackett  ›");
+        connect.setTextSize(15);
+        root.addView(connect,spaced(-1,48,0,7));
+        Button source=button("Источники сайтов  ›");
+        source.setTextSize(15);
+        root.addView(source,spaced(-1,48,0,7));
+        Button banner=button("Настройки баннера  ›");
+        banner.setTextSize(15);
+        root.addView(banner,spaced(-1,48,0,15));
+        TextView version=label("MediaShelf 1.8 • Jackett необязателен для сайтов с прямым подключением.",
+            12,MediaDesign.MUTED,false);
+        version.setGravity(Gravity.CENTER);
+        root.addView(version,spaced(-1,-2,0,6));
+        ScrollView scroll=new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.addView(root);
+        AlertDialog dialog=new AlertDialog.Builder(this)
+            .setTitle("Настройки")
+            .setView(scroll)
+            .setNegativeButton("Закрыть",null)
+            .setPositiveButton("Применить",(d,w)->{
+                int saved=columns.getProgress()==0?0:columns.getProgress()+2;
+                prefs.edit().putInt("poster_columns",saved).apply();
+                if(tvLayout && catalogScroll!=null && !catalogItems.isEmpty()){
+                    int prev=catalogScroll.getScrollY();
+                    show(catalogItems);
+                    catalogScroll.post(()->catalogScroll.scrollTo(0,prev));
+                }
+            }).create();
+        connect.setOnClickListener(v->{dialog.dismiss();connectionSettings(false);});
+        source.setOnClickListener(v->{dialog.dismiss();chooseSource();});
+        banner.setOnClickListener(v->{dialog.dismiss();configureBanner();});
+        dialog.show();
+    }
+
+    private void connectionSettings(boolean first) {
         LinearLayout root=column();
         root.setPadding(dp(18),dp(10),dp(18),dp(10));
         EditText jackett=field(root,"Резервный Jackett (необязательно)",prefs.getString("jackett_url","http://192.168.50.2:9117"),false);
