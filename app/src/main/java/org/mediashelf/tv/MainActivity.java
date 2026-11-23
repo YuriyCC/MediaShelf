@@ -59,6 +59,8 @@ public final class MainActivity extends Activity {
     private LinearLayout sourceButtons;
     private TextView sourceSummary;
     private Button sourceSelector;
+    private Button topSearchButton;
+    private Button bannerSettingsButton;
     private boolean tvLayout;
     private boolean tvPreviewMode;
     private boolean compactTvPreview;
@@ -524,51 +526,69 @@ public final class MainActivity extends Activity {
         outer.addView(app,new LinearLayout.LayoutParams(0,-1,1));
 
         LinearLayout header=line();
+        header.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout headerTitles=column();
-        TextView trail=eyebrow(tvPreviewMode?
-            "ПРЕДПРОСМОТР НА ТЕЛЕФОНЕ  /  TV":
-            tvLayout?"ВЗРОСЛЫЙ КАТАЛОГ  /  MEDIASHELF":"MEDIASHELF  /  18+");
-        headerTitles.addView(trail);
-        TextView title=label(tvLayout?"Медиатека":"MediaShelf",
-            compactTvPreview?21:tvLayout?30:24,
-            MediaDesign.TEXT,true);
-        title.setPadding(0,dp(1),0,0);
-        headerTitles.addView(title);
-        header.addView(headerTitles,new LinearLayout.LayoutParams(0,
-            dp(compactTvPreview?48:tvLayout?70:65),1));
-        sourceSelector=button("XXXClub  ▾");
-        sourceSelector.setTextSize(compactTvPreview?11:tvLayout?15:13);
-        sourceSelector.setOnClickListener(v->chooseSource());
-        header.addView(sourceSelector,lp(compactTvPreview?115:tvLayout?176:116,
-            compactTvPreview?38:47));
+        TextView mainTitle=label(tvLayout?"MediaShelf":"MediaShelf",
+            tvLayout?(compactTvPreview?16:19):24,MediaDesign.TEXT,true);
+        headerTitles.addView(mainTitle);
         if(!tvLayout){
+            TextView sub=eyebrow("ТВОЯ МЕДИАТЕКА  /  18+");
+            sub.setTextSize(10);
+            headerTitles.addView(sub);
+        }
+        header.addView(headerTitles,new LinearLayout.LayoutParams(0,
+            dp(tvLayout?(compactTvPreview?38:48):63),1));
+
+        sourceSelector=button("XXXClub  ▾");
+        sourceSelector.setTextSize(tvLayout?(compactTvPreview?11:12):13);
+        sourceSelector.setOnClickListener(v->chooseSource());
+        if(tvLayout){
+            header.addView(sourceSelector,spaced(
+                compactTvPreview?100:130,compactTvPreview?34:40,6,0));
+            topSearchButton=button("⌕");
+            topSearchButton.setTextSize(compactTvPreview?19:24);
+            topSearchButton.setContentDescription("Поиск по каталогу");
+            topSearchButton.setOnClickListener(v->openSearchDialog());
+            header.addView(topSearchButton,spaced(
+                compactTvPreview?37:44,compactTvPreview?34:40,6,0));
+            bannerSettingsButton=button("✦");
+            bannerSettingsButton.setTextSize(compactTvPreview?17:21);
+            bannerSettingsButton.setContentDescription("Настроить баннер");
+            bannerSettingsButton.setOnClickListener(v->configureBanner());
+            header.addView(bannerSettingsButton,spaced(
+                compactTvPreview?37:44,compactTvPreview?34:40,6,0));
+            Button prefsButton=button("⚙");
+            prefsButton.setTextSize(compactTvPreview?17:21);
+            prefsButton.setContentDescription("Настройки");
+            prefsButton.setOnClickListener(v->settings(false));
+            header.addView(prefsButton,lp(
+                compactTvPreview?37:44,compactTvPreview?34:40));
+        }else{
+            header.addView(sourceSelector,spaced(112,43,6,0));
             Button options=button("⋮");
             options.setOnClickListener(v->moreOptions());
-            LinearLayout.LayoutParams op=lp(47,47);op.leftMargin=dp(7);
-            header.addView(options,op);
+            header.addView(options,lp(43,43));
         }
-        if(!compactTvPreview)app.addView(header);
+        app.addView(header,spaced(-1,tvLayout?(compactTvPreview?43:55):68,
+            0,tvLayout?2:7));
 
         status=label("Выбери категорию или найди раздачу",13,MediaDesign.MUTED,false);
         status.setSingleLine(true);status.setEllipsize(TextUtils.TruncateAt.END);
-        if(!compactTvPreview)
-            app.addView(status,spaced(-1,tvLayout?28:25,0,12));
+        if(!tvLayout)app.addView(status,spaced(-1,24,0,8));
 
+        // The full-width search remains on the touch interface only.
+        // On television the top-bar magnifier opens a compact search dialog.
         LinearLayout searchRow=line();
         queryInput=new EditText(this);
         queryInput.setTextColor(MediaDesign.TEXT);
         queryInput.setHintTextColor(0xff8d9dbb);
         queryInput.setSingleLine(true);
-        queryInput.setHint(compactTvPreview?"Поиск по сайту":
-            "Название фильма, студии или темы");
-        queryInput.setTextSize(compactTvPreview?13:tvLayout?18:15);
+        queryInput.setHint("Название фильма, студии или темы");
+        queryInput.setTextSize(15);
         queryInput.setBackground(MediaDesign.outlined(this,
-            0xff1a263b,0xff324463,14,1));
-        queryInput.setPadding(dp(17),0,dp(12),0);
+            0xff1a263b,0xff324463,11,1));
+        queryInput.setPadding(dp(14),0,dp(12),0);
         queryInput.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
-        queryInput.setOnFocusChangeListener((v,f)->queryInput.setBackground(
-            MediaDesign.outlined(this,f?0xff243756:0xff1a263b,
-                f?MediaDesign.ACCENT:0xff324463,14,f?2:1)));
         queryInput.setOnEditorActionListener((v,action,event)->{
             if(action==EditorInfo.IME_ACTION_SEARCH){
                 currentCategory=0;currentCategoryLabel="";
@@ -577,19 +597,16 @@ public final class MainActivity extends Activity {
             }
             return false;
         });
-        searchRow.addView(queryInput,new LinearLayout.LayoutParams(0,
-            dp(compactTvPreview?38:tvLayout?57:52),1));
+        searchRow.addView(queryInput,new LinearLayout.LayoutParams(0,dp(47),1));
         Button go=accentButton("⌕  Найти");
-        LinearLayout.LayoutParams gp=lp(
-            compactTvPreview?80:tvLayout?124:94,
-            compactTvPreview?38:tvLayout?57:52);
-        gp.leftMargin=dp(compactTvPreview?6:10);
+        LinearLayout.LayoutParams gp=lp(88,47);
+        gp.leftMargin=dp(7);
         searchRow.addView(go,gp);
         go.setOnClickListener(v->{
             currentCategory=0;currentCategoryLabel="";
             load(queryInput.getText().toString().trim(),"search");
         });
-        app.addView(searchRow);
+        if(!tvLayout)app.addView(searchRow,spaced(-1,50,0,6));
 
         LinearLayout tabs=line();
         String[] titles={"Новинки","Популярное","Все разделы",
@@ -667,17 +684,78 @@ public final class MainActivity extends Activity {
             });
         }
     }
+    private void openSearchDialog(){
+        EditText search=new EditText(this);
+        search.setSingleLine(true);
+        search.setTextColor(MediaDesign.TEXT);
+        search.setHintTextColor(MediaDesign.MUTED);
+        search.setTextSize(tvLayout?18:16);
+        search.setText(lastQuery);
+        search.setSelectAllOnFocus(true);
+        search.setHint("Название, тема, студия");
+        search.setInputType(InputType.TYPE_CLASS_TEXT);
+        search.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
+        search.setPadding(dp(18),dp(12),dp(18),dp(12));
+        search.setBackground(MediaDesign.outlined(this,0xff172239,
+            MediaDesign.ACCENT,12,1));
+        LinearLayout wrap=column();
+        wrap.setPadding(dp(19),dp(8),dp(19),dp(4));
+        wrap.addView(search,lp(-1,53));
+        AlertDialog dialog=new AlertDialog.Builder(this)
+            .setTitle("Поиск · "+activeSource)
+            .setView(wrap)
+            .setNegativeButton("Отмена",null)
+            .setNeutralButton("Новинки",(d,w)->{
+                currentCategory=0;currentCategoryLabel="";
+                queryInput.setText("");
+                load("","latest");
+            })
+            .setPositiveButton("Найти",(d,w)->{
+                String q=search.getText().toString().trim();
+                currentCategory=0;currentCategoryLabel="";
+                queryInput.setText(q);
+                load(q,q.isEmpty()?"latest":"search");
+            }).create();
+        search.setOnEditorActionListener((v,action,event)->{
+            if(action==EditorInfo.IME_ACTION_SEARCH){
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+                return true;
+            }
+            return false;
+        });
+        dialog.show();
+        search.requestFocus();
+    }
+    private void focusTopSearch(){
+        if(topSearchButton!=null)topSearchButton.requestFocus();
+        else if(queryInput!=null)queryInput.requestFocus();
+    }
+    private void focusCurrentCategory(){
+        for(int i=0;i<filterCodes.size();i++){
+            int code=filterCodes.get(i);
+            if(code==currentCategory && code>0 &&
+                filterButtons.get(i).getVisibility()==View.VISIBLE){
+                filterButtons.get(i).requestFocus();return;
+            }
+            if(code==-1 && currentCategory==0){
+                filterButtons.get(i).requestFocus();return;
+            }
+        }
+        focusTopSearch();
+    }
+
     private void moreOptions() {
         String[] choices={"Выбор сайта","Категории сайта",
-            "Диагностика источников","Настройки",
+            "Настроить баннер","Диагностика источников","Настройки",
             prefs.getBoolean("tv_preview",false)?
                 "Выключить ТВ-режим":"Включить ТВ-режим (горизонтально)"};
         new AlertDialog.Builder(this).setTitle("MediaShelf")
             .setItems(choices,(d,i)->{
                 if(i==0)chooseSource();
                 else if(i==1)categories();
-                else if(i==2)diagnostics();
-                else if(i==3)settings(false);
+                else if(i==2)configureBanner();
+                else if(i==3)diagnostics();
+                else if(i==4)settings(false);
                 else toggleTvPreview();
             }).show();
     }
