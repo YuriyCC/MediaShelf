@@ -1771,6 +1771,7 @@ public final class MainActivity extends Activity {
         final String query;
         final NativeSource source;
         final List<SitePages.Cursor> cursors=new ArrayList<>();
+        int publishedCount=-1;
         final java.util.ArrayDeque<Item> pending=new java.util.ArrayDeque<>();
         final Set<String> seenCandidates=new HashSet<>();
         final List<Item> results=new ArrayList<>();
@@ -1784,6 +1785,10 @@ public final class MainActivity extends Activity {
             query=q;this.source=source;this.category=category;this.id=id;
             for(String term:SearchTerms.words(q))
                 cursors.add(source.begin(term,category));
+            // A site's search may index titles only. Browse uncategorised
+            // listings as a third discovery channel so releases whose terms
+            // live ONLY in description/tags are still discoverable.
+            cursors.add(source.begin("",category));
         }
         boolean hasMore(){
             if(!pending.isEmpty())return true;
@@ -1815,7 +1820,12 @@ public final class MainActivity extends Activity {
                 (!warning.isEmpty()?" · "+warning:"");
             if(status!=null)status.setText("Поиск: "+session.query+
                 " · проверено "+checked+" · найдено "+snapshot.size());
-            show(catalogItems);
+            // Avoid rebuilding/reloading every poster after each inspected
+            // detail: keep TV focus and gallery thumbnails stable.
+            if(session.publishedCount!=snapshot.size() || !active){
+                session.publishedCount=snapshot.size();
+                show(catalogItems);
+            }
         });
     }
     private void scanWords(MultiWordSession session,boolean initial){
