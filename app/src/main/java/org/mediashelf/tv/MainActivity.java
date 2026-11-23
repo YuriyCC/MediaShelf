@@ -12,6 +12,11 @@ import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.text.SpannableString;
+import android.text.Spanned;
+import android.text.style.ReplacementSpan;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
@@ -68,6 +73,7 @@ public final class MainActivity extends Activity {
     private LinearLayout sidebarPanel;
     private LinearLayout sidebarNavigation;
     private Button navHomeButton,navPopularButton,navSourceButton,navFavoritesButton;
+    private Drawable popularFlameIcon;
     private Button navSectionsButton,navActiveCategoryButton;
     private boolean sidebarSectionsExpanded=false;
     private String sidebarFetchedSource="";
@@ -662,6 +668,29 @@ public final class MainActivity extends Activity {
         currentSectionLabel.setText(src+"   /   "+section);
     }
 
+    /**
+     * Inline icon occupies one text character. This lets the Button's normal
+     * CENTER gravity position the flame on precisely the same horizontal axis
+     * as the home and favorite symbols. A compound left drawable cannot do so.
+     * Draw at the vertical centre of the text line at every screen density.
+     */
+    private static final class CenteredDrawableSpan extends ReplacementSpan {
+        private final Drawable icon;
+        CenteredDrawableSpan(Drawable drawable){icon=drawable;}
+        @Override public int getSize(Paint paint,CharSequence text,int start,
+                int end,Paint.FontMetricsInt metrics){
+            return icon.getBounds().width();
+        }
+        @Override public void draw(Canvas canvas,CharSequence text,int start,int end,
+                float x,int top,int y,int bottom,Paint paint){
+            int height=icon.getBounds().height();
+            int centre=(top+bottom)/2;
+            canvas.save();
+            canvas.translate(x,centre-height/2f);
+            icon.draw(canvas);
+            canvas.restore();
+        }
+    }
     private Button addSidebarEntry(String symbol,String label,
         Runnable action,boolean active){
         Button b=button(sidebarCollapsed?symbol:symbol+"   "+label);
@@ -742,15 +771,19 @@ public final class MainActivity extends Activity {
             load("","popular");
         },!favoritesMode&&lastQuery.isEmpty()&&currentCategory==0&&
             lastSort.equals("popular"));
-        navPopularButton.setText(sidebarCollapsed?"":"   Популярное");
-        Drawable flame=getDrawable(R.drawable.ic_flame).mutate();
-        flame.setTint(lastQuery.isEmpty()&&currentCategory==0&&
+        // Do not use setCompoundDrawables: it sticks to the LEFT of the button
+        // even when Gravity.CENTER is set. Put the vector into centered text.
+        popularFlameIcon=getDrawable(R.drawable.ic_flame).mutate();
+        popularFlameIcon.setTint(lastQuery.isEmpty()&&currentCategory==0&&
             lastSort.equals("popular")&&!favoritesMode?
             MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
-        int flameDp=dp(16); // visually match the existing star and other navigation glyphs
-        flame.setBounds(0,0,flameDp,flameDp);
-        navPopularButton.setCompoundDrawables(flame,null,null,null);
-        navPopularButton.setCompoundDrawablePadding(dp(2));
+        int flameDp=dp(16);
+        popularFlameIcon.setBounds(0,0,flameDp,flameDp);
+        SpannableString popularText=new SpannableString(sidebarCollapsed?
+            "\uFFFC":"\uFFFC   Популярное");
+        popularText.setSpan(new CenteredDrawableSpan(popularFlameIcon),0,1,
+            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        navPopularButton.setText(popularText);
         navPopularButton.setGravity(sidebarCollapsed?Gravity.CENTER:
             Gravity.CENTER_VERTICAL|Gravity.LEFT);
         navFavoritesButton=addSidebarEntry("★","Избранное",
@@ -1590,8 +1623,7 @@ public final class MainActivity extends Activity {
                 MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
             navPopularButton.setTextColor(popular?
                 MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
-            Drawable popularIcon=navPopularButton.getCompoundDrawables()[0];
-            if(popularIcon!=null)popularIcon.setTint(popular?
+            if(popularFlameIcon!=null)popularFlameIcon.setTint(popular?
                 MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
         }
         final String source=activeSource;
