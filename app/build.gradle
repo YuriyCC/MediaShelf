@@ -8,8 +8,8 @@ android {
         applicationId 'org.mediashelf.tv'
         minSdk 26
         targetSdk 32
-        versionCode 30
-        versionName '2.9'
+        versionCode 31
+        versionName '3.0'
     }
     // Private signer is supplied at build time by the private signing workflow.
     // Public CI builds must never publish packages signed by ephemeral runner keys.

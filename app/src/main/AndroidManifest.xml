@@ -3,13 +3,13 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
     <uses-feature android:name="android.software.leanback" android:required="false"/>
-    <application android:label="MediaShelf" android:icon="@mipmap/mediashelf_launcher" android:roundIcon="@mipmap/mediashelf_launcher" android:banner="@drawable/banner_mediashelf" android:logo="@mipmap/mediashelf_launcher"
+    <application android:label="MediaShelf" android:icon="@mipmap/mediashelf_launcher" android:roundIcon="@mipmap/mediashelf_launcher" android:banner="@drawable/banner_mediashelf_tv" android:logo="@mipmap/mediashelf_launcher"
         android:usesCleartextTraffic="true" android:theme="@style/MediaShelfTheme">
         <provider android:name=".LocalVideoProvider"
             android:authorities="org.mediashelf.tv.videos"
             android:exported="false"
             android:grantUriPermissions="true"/>
-        <activity android:name=".MainActivity" android:icon="@mipmap/mediashelf_launcher" android:logo="@mipmap/mediashelf_launcher" android:banner="@drawable/banner_mediashelf" android:exported="true" android:screenOrientation="unspecified">
+        <activity android:name=".MainActivity" android:icon="@mipmap/mediashelf_launcher" android:logo="@mipmap/mediashelf_launcher" android:banner="@drawable/banner_mediashelf_tv" android:exported="true" android:screenOrientation="unspecified">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
