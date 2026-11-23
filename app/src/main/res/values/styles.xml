@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="MediaShelfTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:colorAccent">#BA70FF</item>
+        <item name="android:colorControlActivated">#BA70FF</item>
+        <item name="android:alertDialogTheme">@style/MediaShelfDialogTheme</item>
+        <item name="android:statusBarColor">#080E1B</item>
+        <item name="android:navigationBarColor">#080E1B</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+    <style name="MediaShelfDialogTheme" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/dialog_surface</item>
+        <item name="android:colorAccent">#BA70FF</item>
+        <item name="android:colorControlActivated">#BA70FF</item>
+        <item name="android:textColorPrimary">#F5F7FF</item>
+        <item name="android:textColorSecondary">#A4B2CF</item>
+        <item name="android:windowMinWidthMajor">56%</item>
+        <item name="android:windowMinWidthMinor">82%</item>
+    </style>
+</resources>

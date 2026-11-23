@@ -4,7 +4,7 @@
     <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
     <uses-feature android:name="android.software.leanback" android:required="false"/>
     <application android:label="MediaShelf" android:icon="@mipmap/mediashelf_launcher" android:roundIcon="@mipmap/mediashelf_launcher" android:banner="@drawable/banner_mediashelf" android:logo="@mipmap/mediashelf_launcher"
-        android:usesCleartextTraffic="true" android:theme="@android:style/Theme.Material.NoActionBar">
+        android:usesCleartextTraffic="true" android:theme="@style/MediaShelfTheme">
         <activity android:name=".MainActivity" android:icon="@mipmap/mediashelf_launcher" android:logo="@mipmap/mediashelf_launcher" android:banner="@drawable/banner_mediashelf" android:exported="true" android:screenOrientation="unspecified">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
