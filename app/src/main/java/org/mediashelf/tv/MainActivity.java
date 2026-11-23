@@ -3521,7 +3521,8 @@ public final class MainActivity extends Activity {
                 return;
             }
             try{
-                File destination=LocalVideoStore.uniqueTarget(volume.folder,video.name);
+                File destination=LocalVideoStore.resumableTarget(
+                    volume.folder,video.name,hash,video.size);
                 startVideoDownload(video,destination,server,hash);
             }catch(IOException ex){
                 themedDialog().setTitle("Ошибка сохранения")
@@ -3585,80 +3586,80 @@ public final class MainActivity extends Activity {
     private void startVideoDownload(DownloadSelection video,File target,
                                     String server,String hash){
         if(!downloadBusy.compareAndSet(false,true))return;
-        PlaybackProgress state=progressWindow("Скачиваем фильм…");
+        PlaybackProgress state=progressWindow("Подключаем TorrServer…");
         activeDownload=state.active;
-        state.peers.setText("Файл: "+target.getName()+
-            " · накопитель: "+target.getParentFile().getAbsolutePath());
+        File partial=new File(target.getAbsolutePath()+".part");
+        File marker=new File(target.getAbsolutePath()+".part.info");
+        long already=partial.exists()?partial.length():0L;
+        state.update("Подготавливаем скачивание…",
+            already>0?"Продолжение с "+dataSize(already):
+                "Ожидаем данные от TorrServer…",
+            "Накопитель: "+target.getParentFile().getAbsolutePath(),-1);
         state.cancelAction=()->{
             HttpURLConnection connection=activeDownloadConnection;
             if(connection!=null)connection.disconnect();
-            worker.execute(()->{
-                try{Torr.drop(server,hash);}catch(Exception ignored){}
-            });
+            try{
+                worker.execute(()->{
+                    try{Torr.drop(server,hash);}catch(Exception ignored){}
+                });
+            }catch(java.util.concurrent.RejectedExecutionException ignored){}
         };
         getWindow().addFlags(
             android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         worker.execute(()->{
-            HttpURLConnection c=null;
-            final File incomplete=new File(target.getAbsolutePath()+".part");
             String failure=null;
             boolean completed=false;
-            long transferred=0L;
             try{
-                if(target.getParentFile().getUsableSpace()<128L*1024*1024)
-                    throw new IOException("Недостаточно свободного места");
-                c=(HttpURLConnection)new URL(video.stream).openConnection();
-                activeDownloadConnection=c;
-                c.setConnectTimeout(12000);
-                c.setReadTimeout(45000);
-                c.setRequestProperty("User-Agent",SiteDetails.USER_AGENT);
-                int response=c.getResponseCode();
-                if(response!=200 && response!=206)
-                    throw new IOException("TorrServer HTTP "+response);
-                final long length=video.size>0?video.size:c.getContentLengthLong();
-                try(InputStream in=c.getInputStream();
-                    OutputStream output=new FileOutputStream(incomplete)){
-                    byte[] buffer=new byte[65536];
-                    int n;
-                    long tick=android.os.SystemClock.elapsedRealtime();
-                    long bytesInTick=0;
-                    while(state.active.get() && (n=in.read(buffer))!=-1){
-                        output.write(buffer,0,n);
-                        transferred+=n;
-                        bytesInTick+=n;
-                        long now=android.os.SystemClock.elapsedRealtime();
-                        if(now-tick>=900){
-                            final long loaded=transferred;
-                            final double rate=bytesInTick*1000.0/Math.max(1,now-tick);
-                            final int pct=length>0?(int)Math.min(100,
-                                loaded*100L/length):-1;
-                            final String eta=length>loaded&&rate>0?
-                                " · осталось ~"+remaining((long)((length-loaded)/rate*1000)):
-                                "";
+                long available=target.getParentFile().getUsableSpace();
+                if(available<128L*1024*1024)
+                    throw new IOException("Недостаточно свободного места на накопителе");
+                if(video.size>0 && available<Math.max(0,video.size-already)+
+                    128L*1024*1024)
+                    throw new IOException("Свободного места недостаточно для "+
+                        dataSize(video.size));
+                LocalVideoStore.writeDownloadMarker(target,hash,video.size);
+                TorrDownload.transfer(video.stream,partial,video.size,state.active,
+                    new TorrDownload.Observer(){
+                        @Override public void onConnection(HttpURLConnection connection){
+                            activeDownloadConnection=connection;
+                        }
+                        @Override public void onProgress(String stage,long done,
+                            long total,double rate,int retries){
+                            final String progressTitle=stage+"  "+dataSize(done)+
+                                (total>0?" / "+dataSize(total):"");
+                            final String speedTitle=rate>0?
+                                "Скорость: "+dataRate(rate):
+                                "Ожидаем данные от TorrServer…";
+                            final String remainingText=rate>0 && total>done?
+                                " · осталось ~"+remaining((long)(
+                                    (total-done)/rate*1000)):"";
+                            final int percent=total>0?
+                                (int)Math.min(100,done*100/total):-1;
                             main.post(()->{
                                 if(state.active.get())
-                                    state.update("Скачано "+dataSize(loaded)+
-                                        (length>0?" / "+dataSize(length):""),
-                                        "Скорость: "+dataRate(rate),
-                                        (pct>=0?pct+"%": "Скачивание")+eta,pct);
+                                    state.update(progressTitle,speedTitle,
+                                        (percent>=0?percent+"%":"Скачивание")+
+                                        remainingText+
+                                        (retries>0?" · переподключений: "+retries:""),
+                                        percent);
                             });
-                            tick=now;bytesInTick=0;
                         }
-                    }
-                    output.flush();
-                }
-                if(!state.active.get())throw new IOException("Отменено");
-                if(length>0 && transferred<length)
-                    throw new IOException("Загрузка прервалась раньше конца файла");
-                if(!incomplete.renameTo(target))
-                    throw new IOException("Не удалось завершить сохранение");
+                    });
+                if(!state.active.get())
+                    throw new IOException("Загрузка отменена");
+                if(!partial.renameTo(target))
+                    throw new IOException("Накопитель не завершил сохранение файла");
+                marker.delete();
                 completed=true;
             }catch(Exception ex){
                 failure=error(ex);
             }finally{
-                if(c!=null)c.disconnect();
                 activeDownloadConnection=null;
-                if(!completed && incomplete.exists())incomplete.delete();
+                // Keep valid .part + .part.info for retry across app restarts.
+                if(!completed && partial.exists() && partial.length()==0){
+                    partial.delete();
+                    marker.delete();
+                }
                 downloadBusy.set(false);
             }
             final boolean saved=completed,wasOpen=state.active.get();
@@ -3670,12 +3671,15 @@ public final class MainActivity extends Activity {
                 if(isFinishing()||!wasOpen)return;
                 if(!saved)
                     themedDialog().setTitle("Скачивание не завершено")
-                        .setMessage(issue==null?"Проверь свободное место и TorrServer":issue)
+                        .setMessage((issue==null?
+                            "Проверь TorrServer и накопитель":issue)+
+                            "\nЕсли часть фильма загружена, она сохранена. "+
+                            "Для продолжения повторно выбери эту раздачу.")
                         .setPositiveButton("ОК",null).show();
                 else
                     themedDialog().setTitle("Фильм скачан")
-                        .setMessage(target.getName()+"\nСохранён на устройстве. "+
-                            "Доступен в разделе «Загрузки».")
+                        .setMessage(target.getName()+
+                            "\nФайл сохранён в разделе «Загрузки».")
                         .setPositiveButton("Смотреть",(d,w)->playLocalVideo(target))
                         .setNegativeButton("Закрыть",null).show();
             });
