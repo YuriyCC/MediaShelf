@@ -50,7 +50,6 @@ final class SiteDetails {
         if(site.isEmpty())return;
         synchronized(item) {
             if(item.detailsFetched)return;
-            item.detailsFetched=true;
             try {
                 URI u=new URI(item.details);
                 String base=u.getScheme()+"://"+u.getAuthority()+"/";
@@ -102,6 +101,8 @@ final class SiteDetails {
                     }
                     item.screenshots=shots;
                 }
+                // Do not mark a network failure as successfully fetched metadata.
+                item.detailsFetched=true;
             } catch(Exception e) {
                 item.imageError="Карточка "+site+": "+e.getClass().getSimpleName();
             }
