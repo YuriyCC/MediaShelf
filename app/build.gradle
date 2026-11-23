@@ -9,7 +9,7 @@ android {
         minSdk 26
         targetSdk 32
         versionCode 20
-        versionName '1.8.2'
+        versionName '1.9'
     }
     // Private signer is supplied at build time by the private signing workflow.
     // Public CI builds must never publish packages signed by ephemeral runner keys.
