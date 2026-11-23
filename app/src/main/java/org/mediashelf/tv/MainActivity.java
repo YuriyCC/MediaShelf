@@ -1692,7 +1692,7 @@ public final class MainActivity extends Activity {
                 "Новинки для баннера не найдены");
             featuredMeta.setText(featuredLoading?
                 "Настройки баннера: ✦":
-                "Выбери другую рубрику или тему: ✦";
+                "Выбери другую рубрику или тему: ✦");
             featuredEyebrow.setText("НОВИНКИ · ПОДБОРКА MEDIASHELF");
             if(featuredPoster!=null){
                 featuredPoster.setTag(null);
