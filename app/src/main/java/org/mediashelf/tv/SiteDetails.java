@@ -132,7 +132,7 @@ final class SiteDetails {
                 return href;
         }
         for(String key:new String[]{"abs:data-full","abs:data-original","abs:data-zoom",
-                "abs:data-src","abs:data-lazy-src","abs:data-echo","abs:src"}) {
+                "abs:data-src","abs:data-lazy-src","abs:data-echo"}) {
             String url=picture.attr(key);
             if(validImageUrl(url))return url;
         }
@@ -151,7 +151,8 @@ final class SiteDetails {
                 }
             }
         }
-        return "";
+        String src=picture.attr("abs:src");
+        return validImageUrl(src)?src:"";
     }
     static String verifyImage(String link,String referrer) {
         if(!validImageUrl(link))return "нет URL";
