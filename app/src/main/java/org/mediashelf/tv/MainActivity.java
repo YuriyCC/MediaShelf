@@ -613,21 +613,124 @@ public final class MainActivity extends Activity {
         }
         return super.onKeyDown(keyCode,event);
     }
+    private void updateCurrentSection(){
+        if(currentSectionLabel==null)return;
+        SiteCatalog.Site site=SiteCatalog.byId(activeSource);
+        String src=activeSource.equals("all")?"Все сайты":
+            site!=null?site.title:activeSource;
+        String section=!lastQuery.isEmpty()?"Поиск: "+lastQuery:
+            currentCategory>0?currentCategoryLabel:
+            lastSort.equals("popular")?"Популярное":"Новинки";
+        currentSectionLabel.setText(src+"   /   "+section);
+    }
+
+    private Button addSidebarEntry(String symbol,String label,
+        Runnable action,boolean active){
+        Button b=button(sidebarCollapsed?symbol:symbol+"   "+label);
+        b.setTextSize(sidebarCollapsed?
+            (compactTvPreview?17:20):(compactTvPreview?11:14));
+        b.setGravity(sidebarCollapsed?Gravity.CENTER:
+            Gravity.CENTER_VERTICAL|Gravity.LEFT);
+        b.setSingleLine(true);
+        b.setEllipsize(TextUtils.TruncateAt.END);
+        b.setTextColor(active?MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
+        b.setContentDescription(label);
+        b.setSelected(active);
+        b.setPadding(dp(sidebarCollapsed?0:compactTvPreview?6:10),0,
+            dp(sidebarCollapsed?0:5),0);
+        b.setBackground(active?
+            MediaDesign.outlined(this,0xff35205f,MediaDesign.ACCENT,11,1):
+            MediaDesign.round(this,0xff121a2c,11));
+        b.setOnFocusChangeListener((v,f)->{
+            b.setBackground(f?
+                MediaDesign.outlined(this,0xff402568,
+                    MediaDesign.ACCENT_LIGHT,11,2):
+                b.isSelected()?
+                    MediaDesign.outlined(this,0xff35205f,
+                        MediaDesign.ACCENT,11,1):
+                    MediaDesign.round(this,0xff121a2c,11));
+            MediaDesign.animateFocus(b,f);
+        });
+        b.setOnKeyListener((v,key,event)->{
+            if(event.getAction()!=android.view.KeyEvent.ACTION_DOWN)
+                return false;
+            if(key==android.view.KeyEvent.KEYCODE_DPAD_RIGHT){
+                View target=featuredHost!=null && featuredHost.getParent()!=null?
+                    featuredHost:firstCatalogTile;
+                if(target!=null){target.requestFocus();return true;}
+            }
+            if(key==android.view.KeyEvent.KEYCODE_DPAD_LEFT &&
+                !sidebarCollapsed){
+                setSidebarCollapsed(true,true);
+                return true;
+            }
+            return false;
+        });
+        b.setOnClickListener(v->action.run());
+        sidebarNavigation.addView(b,spaced(-1,
+            compactTvPreview?34:42,0,compactTvPreview?3:5));
+        return b;
+    }
+
+    private void renderSidebarNavigation(){
+        if(!tvLayout||sidebarNavigation==null)return;
+        sidebarNavigation.removeAllViews();
+        sidebarPanel.setPadding(dp(sidebarCollapsed?4:compactTvPreview?6:9),
+            dp(compactTvPreview?5:11),
+            dp(sidebarCollapsed?4:compactTvPreview?6:9),
+            dp(compactTvPreview?4:9));
+        sidebarToggleButton=addSidebarEntry("☰","MediaShelf",
+            ()->setSidebarCollapsed(!sidebarCollapsed,true),false);
+        sidebarToggleButton.setContentDescription(sidebarCollapsed?
+            "Развернуть меню MediaShelf":"Свернуть меню MediaShelf");
+        View divider=new View(this);
+        divider.setBackgroundColor(0xff30284a);
+        sidebarNavigation.addView(divider,spaced(-1,1,0,
+            compactTvPreview?5:11));
+        topSearchButton=addSidebarEntry("⌕","Поиск",
+            ()->openSearchDialog(),false);
+        navHomeButton=addSidebarEntry("⌂","Новинки",()->{
+            currentCategory=0;currentCategoryLabel="";
+            if(queryInput!=null)queryInput.setText("");
+            load("","latest");
+        },lastQuery.isEmpty()&&currentCategory==0&&
+            !lastSort.equals("popular"));
+        navPopularButton=addSidebarEntry("★","Популярное",()->{
+            currentCategory=0;currentCategoryLabel="";
+            if(queryInput!=null)queryInput.setText("");
+            load("","popular");
+        },lastQuery.isEmpty()&&currentCategory==0&&
+            lastSort.equals("popular"));
+        addSidebarEntry("▦","Разделы",()->categories(),currentCategory>0);
+        navSourceButton=addSidebarEntry("◈","Источники",
+            ()->chooseSource(),false);
+        bannerSettingsButton=addSidebarEntry("✦","Баннер",
+            ()->configureBanner(),false);
+        addSidebarEntry("⚙","Настройки",()->settings(false),false);
+        addSidebarEntry("◇","Проверка",()->diagnostics(),false);
+        if(tvPreviewMode)addSidebarEntry("⇄","Режим телефона",
+            ()->toggleTvPreview(),false);
+    }
+
+    @Override public void onBackPressed(){
+        if(tvLayout && !sidebarCollapsed){
+            setSidebarCollapsed(true,true);
+            return;
+        }
+        super.onBackPressed();
+    }
     private void setSidebarCollapsed(boolean hide,boolean persist){
         if(!tvLayout)return;
-        sidebarCollapsed=hide;
         if(persist)prefs.edit().putBoolean("sidebar_hidden",hide).apply();
-        if(sidebarPanel!=null)
-            sidebarPanel.setVisibility(hide?View.GONE:View.VISIBLE);
-        if(sidebarToggleButton!=null){
-            sidebarToggleButton.setText(hide?"☰":"❮");
-            sidebarToggleButton.setContentDescription(hide?
-                "Показать левое меню":"Скрыть левое меню");
+        sidebarCollapsed=hide;
+        if(sidebarPanel!=null){
+            android.view.ViewGroup.LayoutParams params=sidebarPanel.getLayoutParams();
+            params.width=dp(hide?(compactTvPreview?46:54):sidebarWidthDp);
+            sidebarPanel.setLayoutParams(params);
         }
-        // Recompute actual card dimensions and column count, without reloading
-        // the tracker or changing search/query/category state.
+        renderSidebarNavigation();
         final int previousScroll=catalogScroll==null?0:catalogScroll.getScrollY();
-        if(catalogScroll!=null && !catalogItems.isEmpty()){
+        if(catalogScroll!=null&&!catalogItems.isEmpty()){
             catalogScroll.post(()->{
                 if(isFinishing())return;
                 show(catalogItems);
@@ -709,6 +812,7 @@ public final class MainActivity extends Activity {
         else if(queryInput!=null)queryInput.requestFocus();
     }
     private void focusCurrentCategory(){
+        if(tvLayout){focusTopSearch();return;}
         for(int i=0;i<filterCodes.size();i++){
             int code=filterCodes.get(i);
             if(code==currentCategory && code>0 &&
@@ -744,6 +848,7 @@ public final class MainActivity extends Activity {
         String title=activeSource.equals("all")?"Все источники":
             current!=null?current.title:activeSource;
         if(sourceSelector!=null)sourceSelector.setText(title+"  ▾");
+        updateCurrentSection();
         if(sourceButtons==null)return;
         sourceButtons.removeAllViews();
         if(sourceSummary!=null)sourceSummary.setText("ИСТОЧНИКИ");
@@ -1151,6 +1256,19 @@ public final class MainActivity extends Activity {
         lastSort=order;
         focusItemAfterLoad=-1;
         updateFilters();
+        updateCurrentSection();
+        if(tvLayout&&navHomeButton!=null){
+            boolean latest=lastQuery.isEmpty()&&currentCategory==0&&
+                !lastSort.equals("popular");
+            boolean popular=lastQuery.isEmpty()&&currentCategory==0&&
+                lastSort.equals("popular");
+            navHomeButton.setSelected(latest);
+            navPopularButton.setSelected(popular);
+            navHomeButton.setTextColor(latest?
+                MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
+            navPopularButton.setTextColor(popular?
+                MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
+        }
         final String source=activeSource;
         final int category=currentCategory;
         final int requestId=++serial;
@@ -1442,9 +1560,9 @@ public final class MainActivity extends Activity {
                 }
                 // TV convention: left from the first poster column reveals
                 // the collapsed navigation menu without using a touchscreen.
-                if(tvLayout && sidebarCollapsed && tileColumn==0 &&
+                if(tvLayout && tileColumn==0 &&
                     key==android.view.KeyEvent.KEYCODE_DPAD_LEFT){
-                    setSidebarCollapsed(false,true);
+                    focusTopSearch();
                     return true;
                 }
                 if(key==android.view.KeyEvent.KEYCODE_DPAD_CENTER ||
