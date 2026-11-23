@@ -1860,6 +1860,25 @@ public final class MainActivity extends Activity {
             }
         });
     }
+    /** Start optional, slower detail/genre/tag scanning AFTER native results. */
+    private void startExtendedSearch(){
+        if(!SearchTerms.needsAndFilter(lastQuery) ||
+            multiWordSession!=null || favoritesMode)return;
+        NativeSource source=NativeSources.get(
+            activeSource.equals("all")?"xxxclub":activeSource);
+        if(source==null)return;
+        MultiWordSession session=new MultiWordSession(lastQuery,source,
+            activeSource.equals("all")?0:currentCategory,serial);
+        // Never lose or re-filter anything returned by the site's native
+        // search, even if some results don't contain both words in the title.
+        for(Item item:catalogItems){
+            session.results.add(item);
+            session.found.add(catalogKey(item));
+            session.seenCandidates.add(catalogKey(item));
+        }
+        multiWordSession=session;
+        scanWords(session,true);
+    }
     private void scanWords(MultiWordSession session,boolean initial){
         if(session.running)return;
         session.running=true;
@@ -2150,6 +2169,18 @@ public final class MainActivity extends Activity {
         cards.addView(heading,spaced(-1,
             compactTvPreview?32:tvLayout?37:60,0,compactTvPreview?2:5));
         if(favoritesMode)addSavedSearchRow();
+        if(!favoritesMode && SearchTerms.needsAndFilter(lastQuery) &&
+            multiWordSession==null &&
+            (activeSource.equals("xxxclub")||activeSource.equals("all")) &&
+            sitePageCursor!=null){
+            Button broaden=button("Дополнительно искать в описаниях и тегах");
+            broaden.setTextSize(compactTvPreview?11:tvLayout?13:14);
+            broaden.setTextColor(MediaDesign.ACCENT_LIGHT);
+            broaden.setBackground(MediaDesign.outlined(this,0xff2b2250,
+                MediaDesign.ACCENT,12,1));
+            broaden.setOnClickListener(v->startExtendedSearch());
+            cards.addView(broaden,spaced(-1,tvLayout?45:50,0,9));
+        }
         TextView line=label("Показано "+Math.min(items.size(),visibleCount)+
             " · Страниц сайта: "+(multiWordSession!=null?
                 multiWordSession.scanned:
@@ -2167,8 +2198,9 @@ public final class MainActivity extends Activity {
         }
         if(items.isEmpty() && sitePageCursor!=null &&
             SearchTerms.needsAndFilter(lastQuery)){
-            TextView guidance=label("Пока нет названий с каждым из введённых слов. "+
-                "Можно загрузить следующую страницу поиска.",13,MediaDesign.MUTED,false);
+            TextView guidance=label("Сайт пока не показал раздач по этой фразе. "+
+                "Можно проверить следующие страницы или отдельно искать в описаниях и тегах.",
+                13,MediaDesign.MUTED,false);
             guidance.setPadding(dp(10),dp(14),dp(10),dp(12));
             cards.addView(guidance,spaced(-1,-2,0,12));
         }
@@ -2336,11 +2368,14 @@ public final class MainActivity extends Activity {
             if(more){
                 // An empty search has no content to scroll: leave a way
                 // to continue scanning without requiring manual pages.
-                if(items.isEmpty() && multiWordSession!=null &&
-                    !multiWordSession.running){
-                    Button continueSearch=button("Продолжить расширенный поиск");
-                    continueSearch.setOnClickListener(v->loadNextPage());
-                    cards.addView(continueSearch,spaced(-1,49,0,10));
+                if(items.isEmpty() && !loadingNextPage &&
+                    ((multiWordSession!=null && !multiWordSession.running) ||
+                     (sitePageCursor!=null && multiWordSession==null))){
+                    Button next=button(multiWordSession!=null?
+                        "Продолжить расширенный поиск":
+                        "Проверить следующую страницу сайта");
+                    next.setOnClickListener(v->loadNextPage());
+                    cards.addView(next,spaced(-1,49,0,10));
                 }else{
                     TextView upcoming=label(loadingNextPage?
                         "Загружаем результаты…":"Прокрути вниз для следующих результатов",
