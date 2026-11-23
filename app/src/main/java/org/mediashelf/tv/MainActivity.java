@@ -563,24 +563,55 @@ public final class MainActivity extends Activity {
             dp(compactTvPreview?9:tvLayout?15:16),0);
         outer.addView(app,new LinearLayout.LayoutParams(0,-1,1));
 
-        // Touch phones retain the original search field and a compact header.
-        // Television uses the permanent navigation rail instead.
+        // Native phone composition: compact top app bar + touch shortcuts.
+        // All actions use the SAME catalog, favorites, playback and settings
+        // implementations as TV; only their screen navigation differs.
         if(!tvLayout){
             LinearLayout header=line();
             header.setGravity(Gravity.CENTER_VERTICAL);
             LinearLayout heading=column();
-            heading.addView(label("MediaShelf",22,MediaDesign.TEXT,true));
+            heading.addView(label("MediaShelf",18,MediaDesign.TEXT,true));
             heading.addView(eyebrow("КАТАЛОГ  /  18+"));
-            header.addView(mediaShelfLogo(),spaced(54,54,0,0));
-            header.addView(heading,new LinearLayout.LayoutParams(0,dp(60),1));
+            header.addView(mediaShelfLogo(),spaced(42,42,5,0));
+            header.addView(heading,new LinearLayout.LayoutParams(0,dp(49),1));
             sourceSelector=button("XXXClub ▾");
-            sourceSelector.setTextSize(12);
+            sourceSelector.setTextSize(11);
             sourceSelector.setOnClickListener(v->chooseSource());
-            header.addView(sourceSelector,spaced(111,43,6,0));
+            header.addView(sourceSelector,spaced(96,41,5,0));
             Button options=button("⋮");
+            options.setContentDescription("Все действия и настройки");
             options.setOnClickListener(v->moreOptions());
-            header.addView(options,lp(43,43));
-            app.addView(header,spaced(-1,65,0,7));
+            header.addView(options,lp(40,41));
+            app.addView(header,spaced(-1,53,0,3));
+            LinearLayout quick=line();
+            quick.setGravity(Gravity.CENTER_VERTICAL);
+            String[] shortcuts={"⌂  Новинки","♨  Популярное","★  Избранное",
+                "▦  Разделы","↓  Загрузки","✦  Баннер"};
+            Runnable[] actions={
+                ()->{currentCategory=0;currentCategoryLabel="";
+                    queryInput.setText("");load("","latest");},
+                ()->{currentCategory=0;currentCategoryLabel="";
+                    queryInput.setText("");load("","popular");},
+                ()->openFavorites(),()->categories(),
+                ()->openDownloads(),()->configureBanner()
+            };
+            for(int i=0;i<shortcuts.length;i++){
+                final Runnable action=actions[i];
+                Button item=button(shortcuts[i]);
+                item.setTextSize(11);
+                item.setTextColor(MediaDesign.ACCENT_LIGHT);
+                item.setPadding(dp(12),0,dp(12),0);
+                item.setBackground(MediaDesign.outlined(this,0xff1b1831,
+                    0xff473263,11,1));
+                item.setOnClickListener(v->action.run());
+                quick.addView(item,spaced(-2,39,6,0));
+            }
+            android.widget.HorizontalScrollView quickScroll=
+                new android.widget.HorizontalScrollView(this);
+            quickScroll.setHorizontalScrollBarEnabled(false);
+            quickScroll.setFillViewport(false);
+            quickScroll.addView(quick);
+            app.addView(quickScroll,spaced(-1,44,0,6));
         }else{
             currentSectionLabel=label("",compactTvPreview?12:14,
                 MediaDesign.MUTED,false);
@@ -610,20 +641,49 @@ public final class MainActivity extends Activity {
             0xff1a263b,0xff324463,11,1));
         queryInput.setPadding(dp(14),0,dp(12),0);
         queryInput.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
+        Button saveMobileSearch=button("☆");
+        saveMobileSearch.setContentDescription("Сохранить запрос в Моих поисках");
+        saveMobileSearch.setTextSize(21);
+        saveMobileSearch.setTextColor(MediaDesign.ACCENT_LIGHT);
+        saveMobileSearch.setBackground(MediaDesign.outlined(this,0xff241b3c,
+            MediaDesign.ACCENT,11,1));
+        saveMobileSearch.setOnClickListener(v->{
+            String query=queryInput.getText().toString().trim();
+            if(query.isEmpty()){
+                Toast.makeText(this,"Сначала введи слова поиска",
+                    Toast.LENGTH_SHORT).show();
+                return;
+            }
+            boolean added=savedSearches.add(query,activeSource,
+                currentCategory,currentCategoryLabel);
+            Toast.makeText(this,added?"Сохранено в «Моих поисках»":
+                "Такой запрос уже сохранён",Toast.LENGTH_SHORT).show();
+        });
         queryInput.setOnEditorActionListener((v,action,event)->{
             if(action==EditorInfo.IME_ACTION_SEARCH){
-                currentCategory=0;currentCategoryLabel="";
-                load(queryInput.getText().toString().trim(),"search");
+                android.view.inputmethod.InputMethodManager input=
+                    (android.view.inputmethod.InputMethodManager)getSystemService(
+                        android.content.Context.INPUT_METHOD_SERVICE);
+                if(input!=null)
+                    input.hideSoftInputFromWindow(queryInput.getWindowToken(),0);
+                saveMobileSearch.requestFocus();
                 return true;
             }
             return false;
         });
         searchRow.addView(queryInput,new LinearLayout.LayoutParams(0,dp(47),1));
-        Button go=accentButton("⌕  Найти");
-        LinearLayout.LayoutParams gp=lp(88,47);
-        gp.leftMargin=dp(7);
+        LinearLayout.LayoutParams sp=lp(46,47);
+        sp.leftMargin=dp(5);
+        searchRow.addView(saveMobileSearch,sp);
+        Button go=accentButton("Найти");
+        LinearLayout.LayoutParams gp=lp(tvLayout?88:68,47);
+        gp.leftMargin=dp(5);
         searchRow.addView(go,gp);
         go.setOnClickListener(v->{
+            android.view.inputmethod.InputMethodManager input=
+                (android.view.inputmethod.InputMethodManager)getSystemService(
+                    android.content.Context.INPUT_METHOD_SERVICE);
+            if(input!=null)input.hideSoftInputFromWindow(queryInput.getWindowToken(),0);
             currentCategory=0;currentCategoryLabel="";
             load(queryInput.getText().toString().trim(),"search");
         });
