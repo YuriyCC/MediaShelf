@@ -209,6 +209,19 @@ public final class MainActivity extends Activity {
         if(!prefs.getString("api_key","").isEmpty())loadSources();
         if(favoritesMode)openFavorites();
         else load(lastQuery,lastSort);
+        // After cold start the TV remote must visibly start on the Home
+        // (house) entry, not on the content grid or an unfocused container.
+        // Run after the sidebar is attached and after any initial Favorites
+        // rebuild; never repeat this on ordinary navigation or onResume.
+        if(tvLayout && sidebarNavigation!=null){
+            sidebarNavigation.post(()->{
+                if(!isFinishing() && navHomeButton!=null &&
+                   navHomeButton.isAttachedToWindow()){
+                    navHomeButton.setFocusableInTouchMode(true);
+                    navHomeButton.requestFocus();
+                }
+            });
+        }
     }
     @Override protected void onSaveInstanceState(Bundle out){
         out.putString("last_query",lastQuery);
@@ -832,6 +845,7 @@ public final class MainActivity extends Activity {
 
     private void renderSidebarNavigation(){
         if(!tvLayout||sidebarNavigation==null)return;
+        boolean homeHadFocus=navHomeButton!=null && navHomeButton.hasFocus();
         sidebarNavigation.removeAllViews();
         sidebarPanel.setPadding(dp(sidebarCollapsed?5:compactTvPreview?8:12),
             dp(compactTvPreview?5:11),
@@ -881,6 +895,9 @@ public final class MainActivity extends Activity {
         addSidebarEntry("◇","Проверка",()->diagnostics(),false);
         if(tvPreviewMode)addSidebarEntry("⇄","Режим телефона",
             ()->toggleTvPreview(),false);
+        // When background source refresh rebuilds the sidebar, preserve
+        // the focused house button rather than dropping focus into posters.
+        if(homeHadFocus && navHomeButton!=null)navHomeButton.requestFocus();
     }
 
     /**
