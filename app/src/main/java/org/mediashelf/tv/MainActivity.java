@@ -44,6 +44,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.IOException;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -119,9 +121,8 @@ public final class MainActivity extends Activity {
     private PopupWindow cardActionPopup;
     private View cardReturnFocus;
     private int cardReturnScroll;
-    private static final int SAVE_VIDEO_REQUEST=9301;
-    private DownloadSelection pendingDownload;
     private AtomicBoolean activeDownload;
+    private final AtomicBoolean downloadBusy=new AtomicBoolean(false);
     private volatile HttpURLConnection activeDownloadConnection;
     private final Handler main = new Handler(Looper.getMainLooper());
     private SharedPreferences prefs;
@@ -882,6 +883,7 @@ public final class MainActivity extends Activity {
                 MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
         navFavoritesButton=addSidebarEntry("★","Избранное",
             ()->openFavorites(),favoritesMode);
+        addSidebarEntry("↓","Загрузки",()->openDownloads(),false);
         navSectionsButton=addSidebarEntry(
             sidebarSectionsExpanded && !sidebarCollapsed?"▾":"▦",
             "Разделы",()->toggleSidebarSections(),currentCategory>0);
@@ -1267,15 +1269,16 @@ public final class MainActivity extends Activity {
 
     private void moreOptions() {
         String[] choices={"Выбор сайта","Категории сайта",
-            "Настроить баннер","Диагностика источников","Настройки",
-            prefs.getBoolean("tv_preview",false)?
+            "Загрузки","Настроить баннер","Диагностика источников",
+            "Настройки",prefs.getBoolean("tv_preview",false)?
                 "Выключить ТВ-режим":"Включить ТВ-режим (горизонтально)"};
         showSelectionDialog("MediaShelf",choices,(d,i)->{
                 if(i==0)chooseSource();
                 else if(i==1)categories();
-                else if(i==2)configureBanner();
-                else if(i==3)diagnostics();
-                else if(i==4)settings(false);
+                else if(i==2)openDownloads();
+                else if(i==3)configureBanner();
+                else if(i==4)diagnostics();
+                else if(i==5)settings(false);
                 else toggleTvPreview();
             },"Закрыть");
     }
@@ -3220,23 +3223,8 @@ public final class MainActivity extends Activity {
         if(mode==0){launch(stream);return;}
         if(mode==2){
             String name=video.path.substring(video.path.lastIndexOf('/')+1);
-            if(name.trim().isEmpty())name="MediaShelf-video.mp4";
-            pendingDownload=new DownloadSelection(stream,name,video.size);
-            Intent picker=new Intent(Intent.ACTION_CREATE_DOCUMENT);
-            picker.addCategory(Intent.CATEGORY_OPENABLE);
-            picker.setType("video/*");
-            picker.putExtra(Intent.EXTRA_TITLE,name);
-            picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|
-                Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-            try{startActivityForResult(picker,SAVE_VIDEO_REQUEST);}
-            catch(ActivityNotFoundException e){
-                pendingDownload=null;
-                themedDialog().setTitle("Скачивание недоступно")
-                    .setMessage("На телевизоре нет системного выбора папки. "+
-                        "Подключи USB-накопитель или файловый менеджер "+
-                        "с поддержкой Android Storage Access Framework.")
-                    .setPositiveButton("ОК",null).show();
-            }
+            chooseDownloadDestination(new DownloadSelection(stream,name,video.size),
+                server,opened.hash);
             return;
         }
         PlaybackProgress state=progressWindow("Предзагрузка в буфер TorrServer…",true);
@@ -3326,44 +3314,141 @@ public final class MainActivity extends Activity {
         });
     }
 
-    @Override protected void onActivityResult(int code,int result,Intent data){
-        super.onActivityResult(code,result,data);
-        if(code!=SAVE_VIDEO_REQUEST)return;
-        DownloadSelection job=pendingDownload;
-        pendingDownload=null;
-        if(result!=Activity.RESULT_OK || data==null || data.getData()==null ||
-            job==null)return;
-        android.net.Uri destination=data.getData();
-        startVideoDownload(job,destination);
+    /** Choose built-in or removable app-owned storage, no system picker. */
+    private void chooseDownloadDestination(DownloadSelection video,String server,String hash){
+        if(downloadBusy.get()){
+            themedDialog().setTitle("Загрузка уже выполняется")
+                .setMessage("Дождись завершения текущего скачивания или отмени его.")
+                .setPositiveButton("ОК",null).show();
+            return;
+        }
+        List<LocalVideoStore.Volume> disks=LocalVideoStore.volumes(this);
+        if(disks.isEmpty()){
+            themedDialog().setTitle("Некуда сохранить фильм")
+                .setMessage("У приложения нет доступной папки для записи.")
+                .setPositiveButton("ОК",null).show();
+            return;
+        }
+        String[] choices=new String[disks.size()];
+        for(int i=0;i<choices.length;i++){
+            LocalVideoStore.Volume volume=disks.get(i);
+            choices[i]=volume.label+" · свободно "+
+                dataSize(volume.folder.getUsableSpace());
+        }
+        showSelectionDialog("Куда сохранить фильм?",choices,(d,index)->{
+            if(index<0||index>=disks.size())return;
+            LocalVideoStore.Volume volume=disks.get(index);
+            long reserve=128L*1024*1024;
+            if(video.size>0 && volume.folder.getUsableSpace()<video.size+reserve){
+                themedDialog().setTitle("Не хватает памяти")
+                    .setMessage("Для фильма нужно "+dataSize(video.size)+
+                        ", свободно "+dataSize(volume.folder.getUsableSpace())+
+                        ". Выбери другой накопитель.")
+                    .setPositiveButton("ОК",null).show();
+                return;
+            }
+            try{
+                File destination=LocalVideoStore.uniqueTarget(volume.folder,video.name);
+                startVideoDownload(video,destination,server,hash);
+            }catch(IOException ex){
+                themedDialog().setTitle("Ошибка сохранения")
+                    .setMessage(error(ex)).setPositiveButton("ОК",null).show();
+            }
+        },"Отмена");
     }
-    private void startVideoDownload(DownloadSelection video,android.net.Uri destination){
-        PlaybackProgress state=progressWindow("Скачиваем фильм на выбранный накопитель…");
+    /** Saved local files can be played/deleted without a file manager. */
+    private void openDownloads(){
+        List<File> files=LocalVideoStore.completed(this);
+        if(files.isEmpty()){
+            themedDialog().setTitle("Загрузки")
+                .setMessage("Скачанных фильмов пока нет. Открой раздачу, "+
+                    "выбери Play → «Скачать полностью».")
+                .setPositiveButton("ОК",null).show();
+            return;
+        }
+        String[] names=new String[files.size()];
+        for(int i=0;i<names.length;i++)
+            names[i]=files.get(i).getName()+" · "+dataSize(files.get(i).length());
+        showSelectionDialog("Загрузки · "+files.size(),names,(dialog,index)->{
+            if(index<0||index>=files.size())return;
+            File file=files.get(index);
+            showSelectionDialog(file.getName(),new String[]{
+                "▶  Смотреть с телевизора","✕  Удалить файл"
+            },(dlg,choice)->{
+                if(choice==0)playLocalVideo(file);
+                else if(choice==1)
+                    themedDialog().setTitle("Удалить скачанный фильм?")
+                        .setMessage(file.getName())
+                        .setPositiveButton("Удалить",(d,w)->{
+                            boolean removed=file.delete();
+                            Toast.makeText(this,removed?"Файл удалён":
+                                "Не удалось удалить файл",Toast.LENGTH_LONG).show();
+                            openDownloads();
+                        }).setNegativeButton("Отмена",null).show();
+            },"Назад");
+        },"Закрыть");
+    }
+    private void playLocalVideo(File file){
+        try{
+            Uri uri=LocalVideoStore.uri(this,file);
+            Intent intent=new Intent(Intent.ACTION_VIEW);
+            intent.setDataAndType(uri,LocalVideoStore.mime(file));
+            intent.setClipData(android.content.ClipData.newRawUri("MediaShelf",uri));
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(intent);
+        }catch(Exception e){
+            themedDialog().setTitle("Не удалось открыть фильм")
+                .setMessage("Проверь, установлен ли видеоплеер. "+error(e))
+                .setPositiveButton("ОК",null).show();
+        }
+    }
+    private static String remaining(long millis){
+        long seconds=millis/1000;
+        if(seconds<60)return seconds+" сек";
+        long minutes=seconds/60;
+        if(minutes<60)return minutes+" мин";
+        return minutes/60+" ч "+(minutes%60)+" мин";
+    }
+    private void startVideoDownload(DownloadSelection video,File target,
+                                    String server,String hash){
+        if(!downloadBusy.compareAndSet(false,true))return;
+        PlaybackProgress state=progressWindow("Скачиваем фильм…");
         activeDownload=state.active;
+        state.peers.setText("Файл: "+target.getName()+
+            " · накопитель: "+target.getParentFile().getAbsolutePath());
         state.cancelAction=()->{
             HttpURLConnection connection=activeDownloadConnection;
             if(connection!=null)connection.disconnect();
+            worker.execute(()->{
+                try{Torr.drop(server,hash);}catch(Exception ignored){}
+            });
         };
         getWindow().addFlags(
             android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         worker.execute(()->{
             HttpURLConnection c=null;
-            long transferred=0;
+            final File incomplete=new File(target.getAbsolutePath()+".part");
+            String failure=null;
             boolean completed=false;
-            try(OutputStream output=getContentResolver().openOutputStream(destination,"w")){
-                if(output==null)throw new IOException("Нет доступа к выбранному файлу");
+            long transferred=0L;
+            try{
+                if(target.getParentFile().getUsableSpace()<128L*1024*1024)
+                    throw new IOException("Недостаточно свободного места");
                 c=(HttpURLConnection)new URL(video.stream).openConnection();
                 activeDownloadConnection=c;
                 c.setConnectTimeout(12000);
                 c.setReadTimeout(45000);
                 c.setRequestProperty("User-Agent",SiteDetails.USER_AGENT);
-                int status=c.getResponseCode();
-                if(status!=200 && status!=206)
-                    throw new IOException("TorrServer HTTP "+status);
+                int response=c.getResponseCode();
+                if(response!=200 && response!=206)
+                    throw new IOException("TorrServer HTTP "+response);
                 final long length=video.size>0?video.size:c.getContentLengthLong();
-                try(InputStream in=c.getInputStream()){
+                try(InputStream in=c.getInputStream();
+                    OutputStream output=new FileOutputStream(incomplete)){
                     byte[] buffer=new byte[65536];
                     int n;
-                    long tick=android.os.SystemClock.elapsedRealtime(),bytesInTick=0;
+                    long tick=android.os.SystemClock.elapsedRealtime();
+                    long bytesInTick=0;
                     while(state.active.get() && (n=in.read(buffer))!=-1){
                         output.write(buffer,0,n);
                         transferred+=n;
@@ -3371,84 +3456,59 @@ public final class MainActivity extends Activity {
                         long now=android.os.SystemClock.elapsedRealtime();
                         if(now-tick>=900){
                             final long loaded=transferred;
-                            final double rate=bytesInTick*1000.0/
-                                Math.max(1,now-tick);
+                            final double rate=bytesInTick*1000.0/Math.max(1,now-tick);
                             final int pct=length>0?(int)Math.min(100,
                                 loaded*100L/length):-1;
+                            final String eta=length>loaded&&rate>0?
+                                " · осталось ~"+remaining((long)((length-loaded)/rate*1000)):
+                                "";
                             main.post(()->{
                                 if(state.active.get())
                                     state.update("Скачано "+dataSize(loaded)+
                                         (length>0?" / "+dataSize(length):""),
                                         "Скорость: "+dataRate(rate),
-                                        "Сохраняется на выбранный накопитель "+
-                                            (pct>=0?"· "+pct+"%":""),pct);
+                                        (pct>=0?pct+"%": "Скачивание")+eta,pct);
                             });
                             tick=now;bytesInTick=0;
                         }
                     }
+                    output.flush();
                 }
-                output.flush();
-                completed=state.active.get() &&
-                    (length<=0 || transferred>=length);
-                if(!completed && state.active.get())
-                    throw new IOException("Получены не все данные фильма");
-            }catch(Exception error){
-                final String details=error(error);
-                main.post(()->{
-                    if(!isFinishing() && state.active.get())
-                        themedDialog().setTitle("Скачивание прервано")
-                            .setMessage(details).setPositiveButton("ОК",null).show();
-                });
+                if(!state.active.get())throw new IOException("Отменено");
+                if(length>0 && transferred<length)
+                    throw new IOException("Загрузка прервалась раньше конца файла");
+                if(!incomplete.renameTo(target))
+                    throw new IOException("Не удалось завершить сохранение");
+                completed=true;
+            }catch(Exception ex){
+                failure=error(ex);
             }finally{
                 if(c!=null)c.disconnect();
                 activeDownloadConnection=null;
-                getWindow().getDecorView().post(()->{
-                    if(!isFinishing())getWindow().clearFlags(
-                        android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-                });
+                if(!completed && incomplete.exists())incomplete.delete();
+                downloadBusy.set(false);
             }
-            final boolean success=completed;
+            final boolean saved=completed,wasOpen=state.active.get();
+            final String issue=failure;
             main.post(()->{
-                boolean wasOpen=state.active.get();
+                getWindow().clearFlags(
+                    android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                 state.close();
-                if(!success){
-                    // Avoid leaving a file that looks playable but is truncated.
-                    try{
-                        if(android.provider.DocumentsContract.isDocumentUri(this,destination))
-                            android.provider.DocumentsContract.deleteDocument(
-                                getContentResolver(),destination);
-                    }catch(Exception ignored){}
-                    return;
-                }
-                if(!isFinishing() && wasOpen)
-                    themedDialog().setTitle("Скачивание завершено")
-                        .setMessage("Фильм сохранён. Его можно смотреть без торрента.")
-                        .setPositiveButton("Смотреть",(d,w)->{
-                            Intent open=new Intent(Intent.ACTION_VIEW);
-                            open.setDataAndType(destination,"video/*");
-                            open.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                            try{startActivity(open);}catch(Exception e){
-                                Toast.makeText(this,"Не найден локальный видеоплеер",
-                                    Toast.LENGTH_LONG).show();
-                            }
-                        }).setNegativeButton("Закрыть",null).show();
+                if(isFinishing()||!wasOpen)return;
+                if(!saved)
+                    themedDialog().setTitle("Скачивание не завершено")
+                        .setMessage(issue==null?"Проверь свободное место и TorrServer":issue)
+                        .setPositiveButton("ОК",null).show();
+                else
+                    themedDialog().setTitle("Фильм скачан")
+                        .setMessage(target.getName()+"\nСохранён на устройстве. "+
+                            "Доступен в разделе «Загрузки».")
+                        .setPositiveButton("Смотреть",(d,w)->playLocalVideo(target))
+                        .setNegativeButton("Закрыть",null).show();
             });
         });
     }
-    private void launch(String stream) {
-        Intent i=new Intent(Intent.ACTION_VIEW);i.setDataAndType(Uri.parse(stream),"video/*");
-        try {startActivity(i);}catch(ActivityNotFoundException e){
-            themedDialog().setMessage("Установи видеоплеер, который принимает HTTP-видео (например VLC).").setPositiveButton("ОК",null).show();
-        }
-    }
-    private EditText field(LinearLayout parent,String caption,String value,boolean secret) {
-        TextView label=label(caption,14,MUTED,true);parent.addView(label);
-        EditText field=new EditText(this);field.setText(value);field.setTextColor(WHITE);field.setSingleLine(true);
-        field.setInputType(secret ? (InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD) : (InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI));
-        field.setBackground(MediaDesign.outlined(this,0xff1a263b,0xff483376,12,1));
-        field.setPadding(dp(14),0,dp(12),0);
-        parent.addView(field,spaced(-1,49,0,10));return field;
-    }
+
     private void settings(boolean first) {
         LinearLayout root=column();
         root.setPadding(dp(20),dp(12),dp(20),dp(18));
