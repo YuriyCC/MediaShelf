@@ -93,6 +93,7 @@ public final class MainActivity extends Activity {
     private ScrollView catalogScroll;
     private final ExecutorService worker = Executors.newFixedThreadPool(4);
     private final ExecutorService metadataWorker = Executors.newFixedThreadPool(3);
+    private static final int IMAGE_REQUEST_TAG=0x7f0e0012;
     private final ExecutorService imageWorker = Executors.newFixedThreadPool(5);
     private final ExecutorService fullImageWorker = Executors.newSingleThreadExecutor();
     private View catalogPage;
@@ -2141,9 +2142,12 @@ public final class MainActivity extends Activity {
             return;
         }
         final String cacheKey=(fullResolution?"full:":"poster:")+link;
+        // Old thumbnail downloads must never overwrite a later full-size poster.
+        view.setTag(IMAGE_REQUEST_TAG,cacheKey);
         Bitmap cached=pictureCache.get(cacheKey);
         if(cached!=null && !cached.isRecycled()){
-            if(item==null || view.getTag()==item)view.setImageBitmap(cached);
+            if(cacheKey.equals(view.getTag(IMAGE_REQUEST_TAG)) &&
+                (item==null || view.getTag()==item))view.setImageBitmap(cached);
             return;
         }
         (fullResolution?fullImageWorker:imageWorker).execute(()->{
@@ -2187,7 +2191,9 @@ public final class MainActivity extends Activity {
                     pictureCache.put(cacheKey,bitmap);
                 if(item!=null)item.imageError="";
                 main.post(()->{
-                    if(!isFinishing() && (item==null || view.getTag()==item))
+                    if(!isFinishing() &&
+                       cacheKey.equals(view.getTag(IMAGE_REQUEST_TAG)) &&
+                       (item==null || view.getTag()==item))
                         view.setImageBitmap(bitmap);
                 });
             }catch(Exception error){
