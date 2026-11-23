@@ -2,6 +2,9 @@ package org.mediashelf.tv;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.DialogInterface;
+import android.widget.PopupWindow;
+import android.graphics.drawable.Drawable;
 import android.content.pm.ActivityInfo;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
@@ -99,6 +102,7 @@ public final class MainActivity extends Activity {
     private View catalogPage;
     private View detailsPage;
     private View fullPhotoPage;
+    private PopupWindow cardActionPopup;
     private View cardReturnFocus;
     private int cardReturnScroll;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -275,7 +279,7 @@ public final class MainActivity extends Activity {
 
     private void configureBanner(){
         if(!activeSource.equals("xxxclub")&&!activeSource.equals("all")){
-            new AlertDialog.Builder(this).setTitle("Настройка баннера")
+            themedDialog().setTitle("Настройка баннера")
                 .setMessage("Пока настраивается прямой источник XXXClub. "+
                     "Для других сайтов настройки появятся с их модулями.")
                 .setPositiveButton("Закрыть",null).show();
@@ -339,7 +343,7 @@ public final class MainActivity extends Activity {
         ScrollView scroll=new ScrollView(this);
         scroll.setFillViewport(false);
         scroll.addView(body);
-        new AlertDialog.Builder(this).setTitle("Баннер · XXXClub")
+        themedDialog().setTitle("Баннер · XXXClub")
             .setView(scroll)
             .setNegativeButton("Отмена",null)
             .setNeutralButton("Сбросить",(dialog,which)->{
@@ -732,12 +736,23 @@ public final class MainActivity extends Activity {
             load("","latest");
         },!favoritesMode&&lastQuery.isEmpty()&&currentCategory==0&&
             !lastSort.equals("popular"));
-        navPopularButton=addSidebarEntry("▥","Популярное",()->{
+        navPopularButton=addSidebarEntry("","Популярное",()->{
             currentCategory=0;currentCategoryLabel="";
             if(queryInput!=null)queryInput.setText("");
             load("","popular");
         },!favoritesMode&&lastQuery.isEmpty()&&currentCategory==0&&
             lastSort.equals("popular"));
+        navPopularButton.setText(sidebarCollapsed?"":"   Популярное");
+        Drawable flame=getDrawable(R.drawable.ic_flame).mutate();
+        flame.setTint(lastQuery.isEmpty()&&currentCategory==0&&
+            lastSort.equals("popular")&&!favoritesMode?
+            MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
+        int flameDp=dp(sidebarCollapsed?22:20);
+        flame.setBounds(0,0,flameDp,flameDp);
+        navPopularButton.setCompoundDrawables(flame,null,null,null);
+        navPopularButton.setCompoundDrawablePadding(dp(2));
+        navPopularButton.setGravity(sidebarCollapsed?Gravity.CENTER:
+            Gravity.CENTER_VERTICAL|Gravity.LEFT);
         navFavoritesButton=addSidebarEntry("★","Избранное",
             ()->openFavorites(),favoritesMode);
         navSectionsButton=addSidebarEntry(
@@ -976,7 +991,7 @@ public final class MainActivity extends Activity {
         LinearLayout wrap=column();
         wrap.setPadding(dp(19),dp(8),dp(19),dp(4));
         wrap.addView(search,lp(-1,53));
-        AlertDialog dialog=new AlertDialog.Builder(this)
+        AlertDialog dialog=themedDialog()
             .setTitle("Поиск · "+activeSource)
             .setView(wrap)
             .setNegativeButton("Отмена",null)
@@ -1022,20 +1037,87 @@ public final class MainActivity extends Activity {
         focusTopSearch();
     }
 
+    private AlertDialog.Builder themedDialog(){
+        return new AlertDialog.Builder(this,R.style.MediaShelfDialogTheme);
+    }
+    private TextView selectionRow(String text){
+        TextView option=label(text,tvLayout?16:15,MediaDesign.TEXT,false);
+        option.setFocusable(true);
+        option.setClickable(true);
+        option.setSingleLine(false);
+        option.setMaxLines(2);
+        option.setPadding(dp(17),dp(10),dp(12),dp(10));
+        option.setMinHeight(dp(tvLayout?51:49));
+        option.setBackground(MediaDesign.round(this,0xff192238,12));
+        option.setOnFocusChangeListener((v,focused)->{
+            option.setBackground(focused?
+                MediaDesign.outlined(this,0xff462569,MediaDesign.ACCENT,12,2):
+                MediaDesign.round(this,0xff192238,12));
+            option.setTextColor(focused?MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
+        });
+        return option;
+    }
+    private void showSelectionDialog(String title,String[] options,
+            DialogInterface.OnClickListener selected,String cancelText){
+        LinearLayout body=column();
+        body.setPadding(dp(14),dp(6),dp(14),dp(8));
+        ScrollView scrolling=new ScrollView(this);
+        scrolling.setVerticalScrollBarEnabled(false);
+        scrolling.setFillViewport(false);
+        scrolling.addView(body);
+        AlertDialog dialog=themedDialog().setTitle(title).setView(scrolling)
+            .setNegativeButton(cancelText==null?"Закрыть":cancelText,null).create();
+        for(int i=0;i<options.length;i++){
+            final int index=i;
+            TextView row=selectionRow(options[i]);
+            body.addView(row,spaced(-1,-2,0,2));
+            row.setOnClickListener(v->{
+                dialog.dismiss();
+                selected.onClick(dialog,index);
+            });
+        }
+        dialog.show();
+        if(tvLayout && body.getChildCount()>0)
+            body.getChildAt(0).post(body.getChildAt(0)::requestFocus);
+    }
+    private void dismissCardActionPopup(){
+        if(cardActionPopup!=null){
+            cardActionPopup.dismiss();
+            cardActionPopup=null;
+        }
+    }
+    private TextView contextAction(String label,boolean primary){
+        TextView action=selectionRow(label);
+        action.setTextSize(15);
+        action.setMinHeight(dp(47));
+        action.setPadding(dp(14),dp(7),dp(10),dp(7));
+        action.setTextColor(primary?MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
+        action.setBackground(primary?
+            MediaDesign.round(this,0xff342051,11):
+            MediaDesign.round(this,0xff171e32,11));
+        action.setOnFocusChangeListener((v,focused)->{
+            action.setBackground(focused?
+                MediaDesign.outlined(this,0xff422262,MediaDesign.ACCENT,11,2):
+                MediaDesign.round(this,primary?0xff342051:0xff171e32,11));
+            action.setTextColor(focused?MediaDesign.TEXT:
+                primary?MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
+        });
+        return action;
+    }
+
     private void moreOptions() {
         String[] choices={"Выбор сайта","Категории сайта",
             "Настроить баннер","Диагностика источников","Настройки",
             prefs.getBoolean("tv_preview",false)?
                 "Выключить ТВ-режим":"Включить ТВ-режим (горизонтально)"};
-        new AlertDialog.Builder(this).setTitle("MediaShelf")
-            .setItems(choices,(d,i)->{
+        showSelectionDialog("MediaShelf",choices,(d,i)->{
                 if(i==0)chooseSource();
                 else if(i==1)categories();
                 else if(i==2)configureBanner();
                 else if(i==3)diagnostics();
                 else if(i==4)settings(false);
                 else toggleTvPreview();
-            }).show();
+            },"Закрыть");
     }
     private void refreshSourceMenu() {
         SiteCatalog.Site current=SiteCatalog.byId(activeSource);
@@ -1131,12 +1213,11 @@ public final class MainActivity extends Activity {
             ids.add(site.id);
         }
         titles.add("Дополнительно: индексатор Jackett по ID");ids.add("__manual");
-        new AlertDialog.Builder(this).setTitle("Каталог источников 18+")
-            .setItems(titles.toArray(new String[0]),(dialog,index)->{
+        showSelectionDialog("Каталог источников 18+",titles.toArray(new String[0]),(dialog,index)->{
                 String id=ids.get(index);
                 if(id.equals("__manual"))manualSource();
                 else selectSource(id);
-            }).setNegativeButton("Закрыть",null).show();
+            },"Закрыть");
     }
     private void manualSource() {
         EditText field=new EditText(this);
@@ -1149,7 +1230,7 @@ public final class MainActivity extends Activity {
         LinearLayout wrapper=column();
         wrapper.setPadding(dp(22),0,dp(22),0);
         wrapper.addView(field);
-        AlertDialog dialog=new AlertDialog.Builder(this)
+        AlertDialog dialog=themedDialog()
             .setTitle("ID индексатора Jackett")
             .setMessage("Можно выбрать любой настроенный в Jackett сайт. Введи его ID из настроек Jackett. Это не означает, что сайт уже проверен.")
             .setView(wrapper).setPositiveButton("Выбрать",null)
@@ -1172,7 +1253,7 @@ public final class MainActivity extends Activity {
             prefs.getString("api_key","").isEmpty()){
             SiteCatalog.Site site=SiteCatalog.byId(id);
             if(site!=null && !site.direct){
-                new AlertDialog.Builder(this).setTitle(site.title)
+                themedDialog().setTitle(site.title)
                     .setMessage("Прямой модуль этого сайта ещё разрабатывается. "+
                         "Пока возможен поиск через Jackett при наличии настроенного индексатора. "+
                         "Для XXXClub Jackett больше не нужен.")
@@ -1206,7 +1287,7 @@ public final class MainActivity extends Activity {
         SiteCatalog.Site selected=SiteCatalog.byId(activeSource);
         if(selected!=null && !selected.direct &&
             prefs.getString("api_key","").isEmpty()) {
-            new AlertDialog.Builder(this).setTitle("Разделы · "+selected.title)
+            themedDialog().setTitle("Разделы · "+selected.title)
                 .setMessage("Собственный модуль сайта ещё не готов. "+
                     "После его разработки здесь появятся реальные разделы сайта. "+
                     "Временный просмотр через Jackett требует настройки индексатора.")
@@ -1214,7 +1295,7 @@ public final class MainActivity extends Activity {
             return;
         }
         if(activeSource.equals("all")) {
-            new AlertDialog.Builder(this).setTitle("Категории")
+            themedDialog().setTitle("Категории")
                 .setMessage("Категории у сайтов различаются. Сначала выбери один сайт; MediaShelf получит доступные категории именно для него. Общий поиск работает по всем сайтам.")
                 .setPositiveButton("Выбрать сайт",(d,w)->chooseSource())
                 .setNegativeButton("Закрыть",null).show();
@@ -1243,7 +1324,7 @@ public final class MainActivity extends Activity {
                 main.post(()->{
                     if(isFinishing()||!activeSource.equals(id))return;
                     if(cats.isEmpty()) {
-                        new AlertDialog.Builder(this).setTitle("Категории "+id)
+                        themedDialog().setTitle("Категории "+id)
                             .setMessage("Сайт отвечает, но Jackett не объявил отдельных категорий. Это не значит, что на самом сайте их нет: для него потребуется отдельный модуль каталога.")
                             .setPositiveButton("Закрыть",null).show();
                         return;
@@ -1253,7 +1334,7 @@ public final class MainActivity extends Activity {
             }catch(Exception e){
                 main.post(()->{
                     if(isFinishing()||!activeSource.equals(id))return;
-                    new AlertDialog.Builder(this).setTitle("Категории "+id)
+                    themedDialog().setTitle("Категории "+id)
                         .setMessage("Категории не получены напрямую от индексатора Jackett: "+error(e)+
                             "\n\nПоиск сайта остаётся доступен. Для его собственных разделов нужен отдельный модуль.")
                         .setPositiveButton("Закрыть",null).show();
@@ -1269,11 +1350,10 @@ public final class MainActivity extends Activity {
         labels.add(adapter?"Категории от прямого модуля сайта":"Обновить категории из Jackett");
         String title=(id.equals("xxxclub")?"XXXClub":id)+" — категории"+
             (adapter?" (адаптер сайта)":"");
-        new AlertDialog.Builder(this).setTitle(title)
-            .setItems(labels.toArray(new String[0]),(d,pos)->{
+        showSelectionDialog(title,labels.toArray(new String[0]),(d,pos)->{
                 if(pos==labels.size()-1) {
                     if(adapter) {
-                        new AlertDialog.Builder(this).setTitle("Категории")
+                        themedDialog().setTitle("Категории")
                             .setMessage("Этот список взят из адаптера сайта, а не из Jackett. "+
                                 "Обновление категорий будет частью отдельного модуля.")
                             .setPositiveButton("Закрыть",null).show();
@@ -1284,7 +1364,7 @@ public final class MainActivity extends Activity {
                 currentCategoryLabel=pos==0?"":list.get(pos-1).name;
                 queryInput.setText("");
                 load("","latest");
-            }).setNegativeButton("Назад",null).show();
+            },"Назад");
     }
     private void diagnostics() {
         final List<String> titles=new ArrayList<>();
@@ -1294,14 +1374,13 @@ public final class MainActivity extends Activity {
             ids.add(site.id);
         }
         // Android AlertDialog does not reliably combine message + item list.
-        new AlertDialog.Builder(this).setTitle("Источники для диагностики")
-            .setItems(titles.toArray(new String[0]),(d,i)->{
+        showSelectionDialog("Источники для диагностики",titles.toArray(new String[0]),(d,i)->{
                 String id=ids.get(i);
                 if(id.equals("xxxclub"))probeNativeXxxclub();
                 else probeSource(new SourceRegistry.Source(id,
                     SiteCatalog.byId(id).title,SiteCatalog.byId(id).address,
                     "",new ArrayList<SourceRegistry.Category>()));
-            }).setNegativeButton("Закрыть",null).show();
+            },"Закрыть");
     }
     private void probeNativeXxxclub() {
         Toast.makeText(this,"Проверка XXXClub без Jackett",Toast.LENGTH_SHORT).show();
@@ -1329,7 +1408,7 @@ public final class MainActivity extends Activity {
             String result=outcome;
             main.post(()->{
                 if(isFinishing())return;
-                new AlertDialog.Builder(this).setTitle("XXXClub · диагностика")
+                themedDialog().setTitle("XXXClub · диагностика")
                     .setMessage(result).setPositiveButton("Закрыть",null).show();
             });
         });
@@ -1342,7 +1421,7 @@ public final class MainActivity extends Activity {
                 if(isFinishing())return;
                 probeResults.put(source.id,result);
                 refreshSourceMenu();
-                new AlertDialog.Builder(this).setTitle(source.name).setMessage(result)
+                themedDialog().setTitle(source.name).setMessage(result)
                     .setPositiveButton("Другие источники",(d,w)->diagnostics()).setNegativeButton("Закрыть",null).show();
             });
         });
@@ -1402,7 +1481,7 @@ public final class MainActivity extends Activity {
         TextView detail=label("Результаты появляются по мере проверки.",13,MUTED,false);
         detail.setPadding(0,dp(14),0,dp(14));
         view.addView(detail);
-        AlertDialog dlg=new AlertDialog.Builder(this).setTitle("Диагностика всех сайтов")
+        AlertDialog dlg=themedDialog().setTitle("Диагностика всех сайтов")
             .setView(view).setPositiveButton("Закрыть",null).create();
         dlg.show();
         List<SourceRegistry.Source> copy=new ArrayList<>(sources);
@@ -1501,6 +1580,9 @@ public final class MainActivity extends Activity {
             navHomeButton.setTextColor(latest?
                 MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
             navPopularButton.setTextColor(popular?
+                MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
+            Drawable popularIcon=navPopularButton.getCompoundDrawables()[0];
+            if(popularIcon!=null)popularIcon.setTint(popular?
                 MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
         }
         final String source=activeSource;
@@ -1785,7 +1867,7 @@ public final class MainActivity extends Activity {
             tile.setOnClickListener(v->details(item));
             tile.setLongClickable(true);
             tile.setOnLongClickListener(v->{
-                showTileActions(item);
+                showTileActions(v,item);
                 return true;
             });
             final int tileRow=i/columns;
@@ -2204,34 +2286,47 @@ public final class MainActivity extends Activity {
             }
         });
     }
-    private void showTileActions(Item item){
-        boolean marked=favorites.contains(favoriteRecord(item));
-        String[] actions={"▶  Смотреть",
-            marked?"★  Убрать из избранного":"☆  Добавить в избранное"};
-        new AlertDialog.Builder(this)
-            .setTitle(item.title)
-            .setItems(actions,(dialog,selected)->{
-                if(selected==0){
-                    if(item.link().isEmpty() && SiteDetails.supported(item) &&
-                       !item.detailsFetched){
-                        metadataWorker.execute(()->{
-                            SiteDetails.enrich(item);
-                            main.post(()->{
-                                if(!isFinishing())play(item);
-                            });
-                        });
-                    }else play(item);
-                }else{
-                    boolean added=favorites.toggle(favoriteRecord(item));
-                    Toast.makeText(this,added?"Добавлено в избранное":"Удалено из избранного",
-                        Toast.LENGTH_SHORT).show();
-                    if(favoritesMode)openFavorites();
-                }
-            })
-            .setNegativeButton("Отмена",null)
-            .show();
+    private void showTileActions(View anchor,Item item){
+        dismissCardActionPopup();
+        LinearLayout body=column();
+        body.setPadding(dp(7),dp(7),dp(7),dp(7));
+        body.setBackground(MediaDesign.outlined(this,0xff101626,
+            0xff603d8e,14,1));
+        TextView playAction=contextAction("▶   Смотреть",true);
+        TextView favoriteAction=contextAction(
+            favorites.contains(favoriteRecord(item))?
+                "★   Убрать из избранного":"☆   Добавить в избранное",false);
+        body.addView(playAction,spaced(-1,47,0,5));
+        body.addView(favoriteAction,lp(-1,47));
+        PopupWindow popup=new PopupWindow(body,dp(compactTvPreview?230:258),
+            dp(111),true);
+        cardActionPopup=popup;
+        popup.setBackgroundDrawable(MediaDesign.round(this,0xff101626,14));
+        popup.setElevation(dp(14));
+        popup.setOutsideTouchable(true);
+        popup.setClippingEnabled(true);
+        playAction.setOnClickListener(v->{
+            dismissCardActionPopup();
+            if(item.link().isEmpty() && SiteDetails.supported(item) &&
+                !item.detailsFetched){
+                metadataWorker.execute(()->{
+                    SiteDetails.enrich(item);
+                    main.post(()->{if(!isFinishing())play(item);});
+                });
+            }else play(item);
+        });
+        favoriteAction.setOnClickListener(v->{
+            dismissCardActionPopup();
+            boolean added=favorites.toggle(favoriteRecord(item));
+            Toast.makeText(this,added?"Добавлено в избранное":"Удалено из избранного",
+                Toast.LENGTH_SHORT).show();
+            if(favoritesMode)openFavorites();
+        });
+        popup.showAsDropDown(anchor,0,-dp(2),Gravity.START);
+        playAction.post(playAction::requestFocus);
     }
     private void details(Item item) {
+        dismissCardActionPopup();
         cardReturnFocus=getCurrentFocus();
         cardReturnScroll=catalogScroll==null?0:catalogScroll.getScrollY();
         if(SiteDetails.supported(item) && !item.detailsFetched) {
@@ -2437,19 +2532,18 @@ public final class MainActivity extends Activity {
                     if(opened.files.size()==1){launch(Torr.url(server,opened.hash,opened.files.get(0)));return;}
                     String[] names=new String[opened.files.size()];
                     for(int i=0;i<names.length;i++)names[i]=opened.files.get(i).path;
-                    new AlertDialog.Builder(this).setTitle("Выбери видеофайл")
-                        .setItems(names,(d,n)->launch(Torr.url(server,opened.hash,opened.files.get(n))))
-                        .setNegativeButton("Отмена",null).show();
+                    showSelectionDialog("Выбери видеофайл",names,
+                        (d,n)->launch(Torr.url(server,opened.hash,opened.files.get(n))),"Отмена");
                 });
             }catch(Exception e){
-                main.post(()->{if(!isFinishing())new AlertDialog.Builder(this).setTitle("Ошибка TorrServer").setMessage(error(e)).setPositiveButton("ОК",null).show();});
+                main.post(()->{if(!isFinishing())themedDialog().setTitle("Ошибка TorrServer").setMessage(error(e)).setPositiveButton("ОК",null).show();});
             }
         });
     }
     private void launch(String stream) {
         Intent i=new Intent(Intent.ACTION_VIEW);i.setDataAndType(Uri.parse(stream),"video/*");
         try {startActivity(i);}catch(ActivityNotFoundException e){
-            new AlertDialog.Builder(this).setMessage("Установи видеоплеер, который принимает HTTP-видео (например VLC).").setPositiveButton("ОК",null).show();
+            themedDialog().setMessage("Установи видеоплеер, который принимает HTTP-видео (например VLC).").setPositiveButton("ОК",null).show();
         }
     }
     private EditText field(LinearLayout parent,String caption,String value,boolean secret) {
@@ -2501,14 +2595,14 @@ public final class MainActivity extends Activity {
         Button banner=button("Настройки баннера  ›");
         banner.setTextSize(15);
         root.addView(banner,spaced(-1,48,0,15));
-        TextView version=label("MediaShelf 2.0 • Jackett необязателен для сайтов с прямым подключением.",
+        TextView version=label("MediaShelf 2.1 • Jackett необязателен для сайтов с прямым подключением.",
             12,MediaDesign.MUTED,false);
         version.setGravity(Gravity.CENTER);
         root.addView(version,spaced(-1,-2,0,6));
         ScrollView scroll=new ScrollView(this);
         scroll.setVerticalScrollBarEnabled(false);
         scroll.addView(root);
-        AlertDialog dialog=new AlertDialog.Builder(this)
+        AlertDialog dialog=themedDialog()
             .setTitle("Настройки")
             .setView(scroll)
             .setNegativeButton("Закрыть",null)
@@ -2537,7 +2631,7 @@ public final class MainActivity extends Activity {
         selected.setPadding(0,dp(15),0,dp(10));
         root.addView(selected);
         ScrollView scroll=new ScrollView(this);scroll.addView(root);
-        AlertDialog.Builder b=new AlertDialog.Builder(this).setTitle("Подключения").setView(scroll)
+        AlertDialog.Builder b=themedDialog().setTitle("Подключения").setView(scroll)
             .setPositiveButton("Сохранить",(d,w)->{
                 prefs.edit().putString("jackett_url",jackett.getText().toString().trim())
                     .putString("api_key",key.getText().toString().trim())
@@ -2550,6 +2644,7 @@ public final class MainActivity extends Activity {
         b.show();
     }
     @Override protected void onDestroy() {
+        dismissCardActionPopup();
         main.removeCallbacks(carouselAdvance);
         featuredHost=null;
         serial++;worker.shutdownNow();metadataWorker.shutdownNow();
