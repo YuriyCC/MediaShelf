@@ -145,6 +145,9 @@ public final class MainActivity extends Activity {
     private String lastQuery = "";
     private String lastSort = "latest";
     private int catalogSortMode=0;
+    // A view-only filter for the titles loaded in the current section.
+    // It does not change the website request or saved search queries.
+    private String catalogFilterWord="";
 
     private int dp(float value) { return (int)(getResources().getDisplayMetrics().density * value + 0.5f); }
     private GradientDrawable panel(int bg, boolean focus) {
@@ -1902,6 +1905,7 @@ public final class MainActivity extends Activity {
         cards.addView(horizontal,spaced(-1,53,0,9));
     }
     private void openFavorites(){
+        catalogFilterWord="";
         favoritesMode=true;
         ++serial; // invalidate any running tracker request
         sitePageCursor=null;
@@ -2131,6 +2135,7 @@ public final class MainActivity extends Activity {
         return accepted;
     }
     private void load(String q,String order) {
+        catalogFilterWord="";
         boolean wasFavorites=favoritesMode;
         favoritesMode=false;
         if(wasFavorites && tvLayout && sidebarNavigation!=null)renderSidebarNavigation();
@@ -2287,6 +2292,9 @@ public final class MainActivity extends Activity {
         return m;
     }
     private void show(List<Item> items) {
+        final List<Item> matchingItems=CatalogTitleFilter.apply(
+            items,item->item.title,catalogFilterWord);
+        final boolean filterActive=!catalogFilterWord.isEmpty();
         View focusedBefore=getCurrentFocus();
         Item focusedItem=focusedBefore!=null && focusedBefore.getTag() instanceof Item?
             (Item)focusedBefore.getTag():null;
@@ -2321,8 +2329,9 @@ public final class MainActivity extends Activity {
         left.addView(caption);
         heading.addView(left,new LinearLayout.LayoutParams(0,
             dp(compactTvPreview?30:tvLayout?35:56),1));
-        TextView number=MediaDesign.tag(this,items.size()+" найдено",
-            MediaDesign.ACCENT_LIGHT,0xff39245b);
+        TextView number=MediaDesign.tag(this,filterActive?
+            matchingItems.size()+" из "+items.size():
+            items.size()+" найдено",MediaDesign.ACCENT_LIGHT,0xff39245b);
         heading.addView(number);
         cards.addView(heading,spaced(-1,
             compactTvPreview?32:tvLayout?37:60,0,compactTvPreview?2:5));
@@ -2335,8 +2344,11 @@ public final class MainActivity extends Activity {
             dp(tvLayout?39:43),1));
         String[] sortingLabels={"Как на сайте","По названию А—Я",
             "По названию Я—А","По имени без префикса А—Я",
-            "По имени без префикса Я—А"};
-        Button sortingButton=button("⇅  "+sortingLabels[catalogSortMode]+"  ▾");
+            "По имени без префикса Я—А","Фильтр по слову…","Сбросить фильтр"};
+        String sortTitle=filterActive?
+            "⌕  "+catalogFilterWord+"  ·  "+sortingLabels[catalogSortMode]:
+            "⇅  "+sortingLabels[catalogSortMode]+"  ▾";
+        Button sortingButton=button(sortTitle);
         sortingButton.setTextSize(tvLayout?12:12);
         sortingButton.setSingleLine(true);
         sortingButton.setEllipsize(TextUtils.TruncateAt.END);
@@ -2359,18 +2371,37 @@ public final class MainActivity extends Activity {
             return false;
         });
         sortingButton.setOnClickListener(v->showSelectionDialog(
-            "Сортировка постеров",sortingLabels,(dlg,choice)->{
+            "Сортировка и фильтр карточек",sortingLabels,(dlg,choice)->{
                 if(choice<0||choice>=sortingLabels.length)return;
-                if(catalogSortMode==choice)return;
-                catalogSortMode=choice;
-                prefs.edit().putInt("catalog_sort_mode",choice).apply();
-                show(catalogItems);
+                if(choice==5){
+                    openCatalogTitleFilterDialog();
+                    return;
+                }
+                if(choice==6){
+                    if(catalogFilterWord.isEmpty())return;
+                    catalogFilterWord="";
+                    resetCatalogScroll=true;
+                    show(catalogItems);
+                }else{
+                    if(catalogSortMode==choice)return;
+                    catalogSortMode=choice;
+                    prefs.edit().putInt("catalog_sort_mode",choice).apply();
+                    show(catalogItems);
+                }
                 if(tvLayout && catalogSortButton!=null)
                     catalogSortButton.post(()->catalogSortButton.requestFocus());
             },"Отмена"));
         sortingBar.addView(sortingButton,spaced(
             tvLayout?(compactTvPreview?188:278):207,tvLayout?39:43,0,0));
         cards.addView(sortingBar,spaced(-1,tvLayout?42:48,0,8));
+        if(filterActive){
+            TextView filterHint=label("Фильтр названий: «"+catalogFilterWord+
+                "» · совпадений в загруженном каталоге: "+
+                matchingItems.size()+". Сброс — в меню сортировки.",
+                tvLayout?12:13,MediaDesign.ACCENT_LIGHT,false);
+            filterHint.setPadding(dp(8),dp(2),dp(8),dp(7));
+            cards.addView(filterHint,spaced(-1,-2,0,3));
+        }
         if(favoritesMode)addSavedSearchRow();
         if(!favoritesMode && SearchTerms.needsAndFilter(lastQuery) &&
             multiWordSession==null &&
@@ -2384,7 +2415,7 @@ public final class MainActivity extends Activity {
             broaden.setOnClickListener(v->startExtendedSearch());
             cards.addView(broaden,spaced(-1,tvLayout?45:50,0,9));
         }
-        TextView line=label("Показано "+Math.min(items.size(),visibleCount)+
+        TextView line=label("Показано "+Math.min(matchingItems.size(),visibleCount)+
             " · Страниц сайта: "+(multiWordSession!=null?
                 multiWordSession.scanned:
                 sitePageCursor!=null?sitePageCursor.pageIndex:"—"),
@@ -2407,19 +2438,24 @@ public final class MainActivity extends Activity {
             guidance.setPadding(dp(10),dp(14),dp(10),dp(12));
             cards.addView(guidance,spaced(-1,-2,0,12));
         }
-        if(items.isEmpty()){
+        if(matchingItems.isEmpty()){
             LinearLayout state=column();
             state.setGravity(Gravity.CENTER);
             state.setPadding(dp(12),dp(33),dp(12),dp(33));
             TextView mark=label("⌕",44,0xff6d88b9,true);
             mark.setGravity(Gravity.CENTER);
             state.addView(mark);
-            TextView info=label(favoritesMode?"Избранное пока пусто":
+            TextView info=label(filterActive?
+                "Нет карточек с этим словом":favoritesMode?
+                "Избранное пока пусто":
                 !lastQuery.trim().isEmpty()?"По этому запросу пока нет результатов":
                 "Здесь пока нет раздач",20,MediaDesign.TEXT,true);
             info.setGravity(Gravity.CENTER);
             state.addView(info,spaced(-1,50,0,2));
-            TextView help=label(favoritesMode?
+            TextView help=label(filterActive?
+                "Проверены только загруженные названия. Можно изменить слово "+
+                "или сбросить фильтр в меню сортировки.":
+                favoritesMode?
                 "Открой карточку и нажми ★ Добавить в избранное":
                 !lastQuery.trim().isEmpty()?
                     "Запрос: «"+lastQuery+"». Попробуй другие слова, "+
@@ -2449,8 +2485,8 @@ public final class MainActivity extends Activity {
         grid.setClipToPadding(false);
         grid.setPadding(dp(2),dp(4),dp(2),dp(5));
         cards.addView(grid);
-        List<Item> displayed=SmartTitleSort.sorted(items,item->item.title,
-            catalogSortMode);
+        List<Item> displayed=SmartTitleSort.sorted(
+            matchingItems,item->item.title,catalogSortMode);
         int limit=Math.min(visibleCount,displayed.size());
 
         for(int i=0;i<limit;i++){
@@ -2585,7 +2621,7 @@ public final class MainActivity extends Activity {
             if(more){
                 // An empty search has no content to scroll: leave a way
                 // to continue scanning without requiring manual pages.
-                if(items.isEmpty() && !loadingNextPage &&
+                if(matchingItems.isEmpty() && !loadingNextPage &&
                     ((multiWordSession!=null && !multiWordSession.running) ||
                      (sitePageCursor!=null && multiWordSession==null))){
                     Button next=button(multiWordSession!=null?
@@ -2615,6 +2651,54 @@ public final class MainActivity extends Activity {
         }
     }
 
+    /** A local title filter inside the existing sorting menu. */
+    private void openCatalogTitleFilterDialog(){
+        LinearLayout body=column();
+        body.setPadding(dp(18),dp(9),dp(18),dp(8));
+        TextView explanation=label(
+            "Показывает только уже загруженные карточки, в названии которых "+
+            "встречается слово. Поиск на сайте не запускается.",
+            14,MediaDesign.MUTED,false);
+        body.addView(explanation,spaced(-1,-2,0,12));
+        EditText word=new EditText(this);
+        word.setSingleLine(true);
+        word.setTextSize(17);
+        word.setTextColor(MediaDesign.TEXT);
+        word.setHint("Имя или слово в названии");
+        word.setHintTextColor(MediaDesign.MUTED);
+        word.setText(catalogFilterWord);
+        word.setSelectAllOnFocus(true);
+        word.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        word.setBackground(MediaDesign.outlined(this,0xff1a263b,
+            MediaDesign.ACCENT,12,1));
+        word.setPadding(dp(14),0,dp(12),0);
+        body.addView(word,spaced(-1,54,0,5));
+        AlertDialog dialog=themedDialog()
+            .setTitle("Фильтр по слову")
+            .setView(body)
+            .setPositiveButton("Показать",(d,w)->{
+                catalogFilterWord=word.getText().toString().trim();
+                resetCatalogScroll=true;
+                show(catalogItems);
+                if(tvLayout && catalogSortButton!=null)
+                    catalogSortButton.post(()->catalogSortButton.requestFocus());
+            })
+            .setNegativeButton("Отмена",null)
+            .create();
+        word.setOnEditorActionListener((v,action,event)->{
+            if(action==EditorInfo.IME_ACTION_DONE){
+                android.view.inputmethod.InputMethodManager input=
+                    (android.view.inputmethod.InputMethodManager)getSystemService(
+                        android.content.Context.INPUT_METHOD_SERVICE);
+                if(input!=null)input.hideSoftInputFromWindow(word.getWindowToken(),0);
+                if(dialog.getButton(AlertDialog.BUTTON_POSITIVE)!=null)
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).requestFocus();
+                return true;
+            }
+            return false;
+        });
+        dialog.show();
+    }
     private void addFeaturedCarousel(){
         final android.widget.FrameLayout hero=new android.widget.FrameLayout(this);
         featuredHost=hero;
