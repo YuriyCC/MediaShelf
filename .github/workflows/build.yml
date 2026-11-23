@@ -1,4 +1,4 @@
-name: MediaShelf 2.4 APK and source build
+name: MediaShelf 2.5 APK and source build
 on:
   push:
     branches: [main]
@@ -32,14 +32,14 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p unsigned-package
-          cp app/build/outputs/apk/release/app-release-unsigned.apk unsigned-package/MediaShelf-2.4-unsigned.apk
-          cp app/build/outputs/apk/debug/app-debug.apk unsigned-package/MediaShelf-2.4-DEBUG-installable.apk
-          git archive --format=zip --output=unsigned-package/MediaShelf-2.4-source.zip HEAD
+          cp app/build/outputs/apk/release/app-release-unsigned.apk unsigned-package/MediaShelf-2.5-unsigned.apk
+          cp app/build/outputs/apk/debug/app-debug.apk unsigned-package/MediaShelf-2.5-DEBUG-installable.apk
+          git archive --format=zip --output=unsigned-package/MediaShelf-2.5-source.zip HEAD
           cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" unsigned-package/apksigner.jar
           cp "$ANDROID_HOME/build-tools/35.0.0/zipalign" unsigned-package/zipalign
       - uses: actions/upload-artifact@v4
         with:
-          name: MediaShelf-2.4-APK-and-source
+          name: MediaShelf-2.5-APK-and-source
           path: unsigned-package/
           retention-days: 14
           if-no-files-found: error
