@@ -33,6 +33,25 @@ final class SearchTerms {
         return query==null?"":query.trim();
     }
 
+    /** A match may span title, distribution details, genre and tag metadata. */
+    static boolean matchesContent(String title,String description,String tags,String query){
+        List<String> terms=words(query);
+        if(terms.isEmpty())return true;
+        String searchable=(title==null?"":title)+" "+
+            (description==null?"":description)+" "+
+            (tags==null?"":tags);
+        for(String term:terms){
+            Pattern wholeWord=Pattern.compile("(?<![\\p{L}\\p{N}])"+
+                Pattern.quote(term)+"(?![\\p{L}\\p{N}])",
+                Pattern.CASE_INSENSITIVE|Pattern.UNICODE_CASE);
+            if(!wholeWord.matcher(searchable).find())return false;
+        }
+        return true;
+    }
+    static boolean matchesContent(MainActivity.Item item,String query){
+        return item!=null && matchesContent(item.title,item.description,item.searchMetadata,query);
+    }
+
     static boolean matchesTitle(String title,String query) {
         List<String> terms=words(query);
         if(terms.size()<2)return true; // Preserve existing single-term source search.
