@@ -1980,7 +1980,8 @@ public final class MainActivity extends Activity {
                     MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
         }
         final String source=activeSource;
-        final String providerQuery=SearchTerms.upstreamQuery(q);
+        // Preserve the full phrase: XXXClub's own search handles all words.
+        final String providerQuery=q==null?"":q.trim();
         final int category=currentCategory;
         final int requestId=++serial;
         if(catalogScroll!=null)catalogScroll.scrollTo(0,0);
@@ -2004,36 +2005,17 @@ public final class MainActivity extends Activity {
         final String base=prefs.getString("jackett_url","http://192.168.50.2:9117");
 
         NativeSource direct=NativeSources.get(source.equals("all")?"xxxclub":source);
-        if(direct!=null && SearchTerms.needsAndFilter(q)){
-            MultiWordSession session=new MultiWordSession(q,direct,
-                source.equals("all")?0:category,requestId);
-            multiWordSession=session;
-            scanWords(session,true);
-            return;
-        }
+        // Primary native search: use the web site's ENTIRE search phrase.
+        // Descriptions/tags scanning is an optional second stage only.
         if(direct!=null) {
             worker.execute(()->{
                 SitePages.Cursor cursor=direct.begin(providerQuery,source.equals("all")?0:category);
                 try {
                     SitePages.Page first=direct.fetchNext(cursor,source.equals("all")?0:category);
-                    List<Item> results=new ArrayList<>(filterByAndTerms(first.items,q));
-                    // Check a second page only when the first has no AND matches;
-                    // otherwise show results immediately without extra network delay.
-                    if(SearchTerms.needsAndFilter(q)){
-                        Set<String> found=new HashSet<>();
-                        for(Item item:results)found.add(catalogKey(item));
-                        for(int attempt=0;attempt<1 && !cursor.finished &&
-                                results.isEmpty();attempt++){
-                            SitePages.Page next;
-                            try {
-                                next=direct.fetchNext(cursor,source.equals("all")?0:category);
-                            }catch(Exception secondaryError){
-                                break; // Keep results from previously loaded pages.
-                            }
-                            for(Item item:filterByAndTerms(next.items,q))
-                                if(found.add(catalogKey(item)))results.add(item);
-                        }
-                    }
+                    // The tracker already decided which releases match the
+                    // entered phrase. Filtering titles here incorrectly
+                    // discarded legitimate website results.
+                    List<Item> results=new ArrayList<>(first.items);
                     if(order.equals("popular"))
                         results.sort(Comparator.comparingInt((Item item)->item.seeders).reversed());
                     main.post(()->{
@@ -2064,7 +2046,7 @@ public final class MainActivity extends Activity {
                     try {
                         Jackett.SearchReport bridged=Jackett.searchReport(base,api,"xxxclub",providerQuery,
                                 source.equals("all")?0:category,25000);
-                        List<Item> results=filterByAndTerms(bridged.items,q);
+                        List<Item> results=new ArrayList<>(bridged.items);
                         main.post(()->{
                             if(isFinishing() || requestId!=serial)return;
                             catalogItems.clear();catalogItems.addAll(results);
@@ -2099,7 +2081,7 @@ public final class MainActivity extends Activity {
         worker.execute(()->{
             try {
                 Jackett.SearchReport report=Jackett.searchReport(base,api,source,providerQuery,category,35000);
-                List<Item> results=filterByAndTerms(report.items,q);
+                List<Item> results=new ArrayList<>(report.items);
                 if(order.equals("popular"))
                     results.sort(Comparator.comparingInt((Item x)->x.seeders).reversed());
                 main.post(()->{
@@ -2584,7 +2566,6 @@ public final class MainActivity extends Activity {
         loadingNextPage=true;
         int job=serial;
         final SitePages.Cursor cursor=sitePageCursor;
-        final String fullSearch=lastQuery;
         final int category=currentCategory;
         final Set<String> existing=new HashSet<>();
         for(Item item:catalogItems)existing.add(catalogKey(item));
@@ -2602,8 +2583,9 @@ public final class MainActivity extends Activity {
                     SitePages.Page p=provider.fetchNext(cursor,category);
                     last=p.message;
                     for(Item item:p.items){
-                        if(SearchTerms.matchesTitle(item.title,fullSearch) &&
-                            existing.add(catalogKey(item)))additional.add(item);
+                        // Never filter the site's next page by title: its own
+                        // search endpoint may match tags or other metadata.
+                        if(existing.add(catalogKey(item)))additional.add(item);
                     }
                     if(!additional.isEmpty())break;
                 }
