@@ -66,6 +66,32 @@ final class FeaturedSelector {
             "\\bсборник\\b|\\bподборка\\b|\\bфотосет\\b).*");
     }
 
+
+    /**
+     * Home carousel defaults to the site's newest releases, in site order.
+     * Allow packs/photos/VR only when the user explicitly selected those
+     * categories in banner settings, not on the all-site default feed.
+     */
+    static List<Integer> selectNewest(List<Candidate> candidates,int limit,
+                                      boolean includeCollections) {
+        if(candidates==null||limit<=0)return Collections.emptyList();
+        List<Integer> result=new ArrayList<>();
+        Set<String> keys=new HashSet<>();
+        for(int i=0;i<candidates.size();i++){
+            Candidate c=candidates.get(i);
+            if(c==null||c.title.trim().isEmpty()||c.seeders<=0)continue;
+            if(!c.poster.startsWith("https://")&&
+                !c.poster.startsWith("http://"))continue;
+            if(!includeCollections&&!eligible(c))continue;
+            String key=!c.details.isEmpty()?c.details.toLowerCase(Locale.ROOT):
+                c.title.toLowerCase(Locale.ROOT).trim();
+            if(!keys.add(key))continue;
+            result.add(i);
+            if(result.size()>=limit)break;
+        }
+        return result;
+    }
+
     private static int score(Candidate c){
         String t=c.title.toLowerCase(Locale.ROOT);
         int quality=0;
