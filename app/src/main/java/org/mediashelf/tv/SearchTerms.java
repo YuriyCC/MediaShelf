@@ -27,9 +27,8 @@ final class SearchTerms {
         return words(query).size()>1;
     }
 
+    /** Always pass the user's full phrase to native site search. */
     static String upstreamQuery(String query) {
-        List<String> terms=words(query);
-        if(terms.size()>1)return terms.get(0);
         return query==null?"":query.trim();
     }
 
