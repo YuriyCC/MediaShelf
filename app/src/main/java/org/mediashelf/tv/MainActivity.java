@@ -204,8 +204,16 @@ public final class MainActivity extends Activity {
         int mode=getResources().getConfiguration().uiMode &
             android.content.res.Configuration.UI_MODE_TYPE_MASK;
         hardwareTv=mode==android.content.res.Configuration.UI_MODE_TYPE_TELEVISION;
-        if(!hardwareTv && prefs.getBoolean("tv_preview",false))
-            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+        if(!hardwareTv){
+            // In older releases a persistent TV-preview setting could force
+            // a phone into landscape + tiny remote-first TV cards. Migrate
+            // that legacy preference without touching favorites or searches.
+            if(prefs.getBoolean("tv_preview",false))
+                prefs.edit().remove("tv_preview").apply();
+            if(ScreenMode.lockPortrait(false,
+                getResources().getConfiguration().smallestScreenWidthDp))
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        }
         activeSource=prefs.getString("indexer","xxxclub");
         sources.addAll(SourceRegistry.fromCache(prefs.getString("source_cache","[]")));
         if(activeSource.isEmpty())activeSource="xxxclub";
@@ -242,15 +250,6 @@ public final class MainActivity extends Activity {
         out.putInt("current_category",currentCategory);
         out.putString("category_label",currentCategoryLabel);
         super.onSaveInstanceState(out);
-    }
-    private void toggleTvPreview(){
-        if(hardwareTv)return;
-        boolean enabled=!prefs.getBoolean("tv_preview",false);
-        prefs.edit().putBoolean("tv_preview",enabled).apply();
-        setRequestedOrientation(enabled?
-            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE:
-            ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
-        recreate();
     }
     private final List<Button> filterButtons=new ArrayList<>();
     private final List<Integer> filterCodes=new ArrayList<>();
@@ -506,11 +505,12 @@ public final class MainActivity extends Activity {
             android.content.res.Configuration.UI_MODE_TYPE_MASK;
         int screenHeightDp=getResources().getConfiguration().screenHeightDp;
         hardwareTv=mode==android.content.res.Configuration.UI_MODE_TYPE_TELEVISION;
-        tvPreviewMode=!hardwareTv && prefs.getBoolean("tv_preview",false);
-        compactTvPreview=tvPreviewMode &&
-            (screenWidthDp<960 || screenHeightDp<650);
-        tvLayout=hardwareTv || tvPreviewMode ||
-            (screenWidthDp>=840 && screenHeightDp>=550);
+        // Phone/tablet => portrait-friendly touch UI, Android TV => rail UI.
+        // Ignore old tv_preview preference and wide/high-density phone screens.
+        tvPreviewMode=false;
+        compactTvPreview=false;
+        tvLayout=ScreenMode.useTvLayout(hardwareTv,
+            prefs.getBoolean("tv_preview",false),screenWidthDp,screenHeightDp);
         sidebarCollapsed=tvLayout && prefs.getBoolean("sidebar_hidden",true);
         sidebarSectionsExpanded=prefs.getBoolean("sections_expanded",currentCategory>0);
         sidebarWidthDp=compactTvPreview?
@@ -520,11 +520,12 @@ public final class MainActivity extends Activity {
         filterButtons.clear();filterCodes.clear();
         getWindow().setStatusBarColor(MediaDesign.BG);
         getWindow().setNavigationBarColor(MediaDesign.BG);
-        if(hardwareTv || tvPreviewMode)
+        if(hardwareTv)
             getWindow().getDecorView().setSystemUiVisibility(
                 View.SYSTEM_UI_FLAG_FULLSCREEN|View.SYSTEM_UI_FLAG_HIDE_NAVIGATION|
                 View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY |
                 View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+        else getWindow().getDecorView().setSystemUiVisibility(0);
         getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
 
         LinearLayout outer=line();
@@ -564,55 +565,53 @@ public final class MainActivity extends Activity {
             dp(compactTvPreview?9:tvLayout?15:16),0);
         outer.addView(app,new LinearLayout.LayoutParams(0,-1,1));
 
-        // Native phone composition: compact top app bar + touch shortcuts.
-        // All actions use the SAME catalog, favorites, playback and settings
-        // implementations as TV; only their screen navigation differs.
+        // Keep the ORIGINAL phone hierarchy: header, search, categories,
+        // posters. New TV features are reachable through touch shortcuts
+        // BELOW the category tabs; they never turn the phone into a TV rail.
+        android.widget.HorizontalScrollView phoneActions=null;
         if(!tvLayout){
+            final boolean narrow=screenWidthDp<370;
             LinearLayout header=line();
             header.setGravity(Gravity.CENTER_VERTICAL);
             LinearLayout heading=column();
-            heading.addView(label("MediaShelf",18,MediaDesign.TEXT,true));
+            heading.addView(label("MediaShelf",narrow?19:22,
+                MediaDesign.TEXT,true));
             heading.addView(eyebrow("КАТАЛОГ  /  18+"));
-            header.addView(mediaShelfLogo(),spaced(42,42,5,0));
-            header.addView(heading,new LinearLayout.LayoutParams(0,dp(49),1));
+            header.addView(mediaShelfLogo(),spaced(narrow?44:54,
+                narrow?44:54,0,0));
+            header.addView(heading,new LinearLayout.LayoutParams(0,dp(60),1));
             sourceSelector=button("XXXClub ▾");
-            sourceSelector.setTextSize(11);
+            sourceSelector.setTextSize(narrow?11:12);
             sourceSelector.setOnClickListener(v->chooseSource());
-            header.addView(sourceSelector,spaced(96,41,5,0));
+            header.addView(sourceSelector,spaced(narrow?92:111,43,6,0));
             Button options=button("⋮");
             options.setContentDescription("Все действия и настройки");
             options.setOnClickListener(v->moreOptions());
-            header.addView(options,lp(40,41));
-            app.addView(header,spaced(-1,53,0,3));
+            header.addView(options,lp(43,43));
+            app.addView(header,spaced(-1,65,0,7));
+
             LinearLayout quick=line();
             quick.setGravity(Gravity.CENTER_VERTICAL);
-            String[] shortcuts={"⌂  Новинки","♨  Популярное","★  Избранное",
-                "▦  Разделы","↓  Загрузки","✦  Баннер"};
+            String[] shortcuts={"★  Избранное","↓  Загрузки",
+                "✦  Настройка баннера"};
             Runnable[] actions={
-                ()->{currentCategory=0;currentCategoryLabel="";
-                    queryInput.setText("");load("","latest");},
-                ()->{currentCategory=0;currentCategoryLabel="";
-                    queryInput.setText("");load("","popular");},
-                ()->openFavorites(),()->categories(),
-                ()->openDownloads(),()->configureBanner()
+                ()->openFavorites(),()->openDownloads(),()->configureBanner()
             };
             for(int i=0;i<shortcuts.length;i++){
                 final Runnable action=actions[i];
                 Button item=button(shortcuts[i]);
-                item.setTextSize(11);
+                item.setTextSize(13);
                 item.setTextColor(MediaDesign.ACCENT_LIGHT);
-                item.setPadding(dp(12),0,dp(12),0);
+                item.setPadding(dp(14),0,dp(14),0);
                 item.setBackground(MediaDesign.outlined(this,0xff1b1831,
                     0xff473263,11,1));
                 item.setOnClickListener(v->action.run());
-                quick.addView(item,spaced(-2,39,6,0));
+                quick.addView(item,spaced(-2,44,7,0));
             }
-            android.widget.HorizontalScrollView quickScroll=
-                new android.widget.HorizontalScrollView(this);
-            quickScroll.setHorizontalScrollBarEnabled(false);
-            quickScroll.setFillViewport(false);
-            quickScroll.addView(quick);
-            app.addView(quickScroll,spaced(-1,44,0,6));
+            phoneActions=new android.widget.HorizontalScrollView(this);
+            phoneActions.setHorizontalScrollBarEnabled(false);
+            phoneActions.setFillViewport(false);
+            phoneActions.addView(quick);
         }else{
             currentSectionLabel=label("",compactTvPreview?12:14,
                 MediaDesign.MUTED,false);
@@ -743,7 +742,13 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams strips=lp(-1,
             compactTvPreview?44:tvLayout?69:60);
         strips.topMargin=dp(6);
-        if(!tvLayout)app.addView(strip,strips);
+        if(!tvLayout){
+            app.addView(strip,strips);
+            // All extra actions from TV available on phone by touch,
+            // without a second duplicate "Новинки/Популярное" menu.
+            if(phoneActions!=null)
+                app.addView(phoneActions,spaced(-1,50,0,7));
+        }
 
         ScrollView results=new ScrollView(this);
         catalogScroll=results;
@@ -1028,8 +1033,6 @@ public final class MainActivity extends Activity {
             ()->configureBanner(),false);
         addSidebarEntry("⚙","Настройки",()->settings(false),false);
         addSidebarEntry("◇","Проверка",()->diagnostics(),false);
-        if(tvPreviewMode)addSidebarEntry("⇄","Режим телефона",
-            ()->toggleTvPreview(),false);
         // When background source refresh rebuilds the sidebar, preserve
         // the focused house button rather than dropping focus into posters.
         if(homeHadFocus && navHomeButton!=null)navHomeButton.requestFocus();
@@ -1402,17 +1405,17 @@ public final class MainActivity extends Activity {
 
     private void moreOptions() {
         String[] choices={"Выбор сайта","Категории сайта",
-            "Загрузки","Настроить баннер","Диагностика источников",
-            "Настройки",prefs.getBoolean("tv_preview",false)?
-                "Выключить ТВ-режим":"Включить ТВ-режим (горизонтально)"};
+            "Избранное и мои поиски","Загрузки","Настроить баннер",
+            "Диагностика источников","Настройки","Выход из приложения"};
         showSelectionDialog("MediaShelf",choices,(d,i)->{
                 if(i==0)chooseSource();
                 else if(i==1)categories();
-                else if(i==2)openDownloads();
-                else if(i==3)configureBanner();
-                else if(i==4)diagnostics();
-                else if(i==5)settings(false);
-                else toggleTvPreview();
+                else if(i==2)openFavorites();
+                else if(i==3)openDownloads();
+                else if(i==4)configureBanner();
+                else if(i==5)diagnostics();
+                else if(i==6)settings(false);
+                else if(i==7)confirmFullExit();
             },"Закрыть");
     }
     private void refreshSourceMenu() {
