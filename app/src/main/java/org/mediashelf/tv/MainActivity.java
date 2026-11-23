@@ -3070,6 +3070,9 @@ public final class MainActivity extends Activity {
             String.format(Locale.US,"%.0f МБ",bytes/1048576.0);
     }
     private PlaybackProgress progressWindow(String title){
+        return progressWindow(title,false);
+    }
+    private PlaybackProgress progressWindow(String title,boolean allowImmediateStart){
         LinearLayout body=column();
         body.setPadding(dp(22),dp(9),dp(22),dp(16));
         TextView stage=label(title,16,MediaDesign.TEXT,true);
@@ -3088,8 +3091,11 @@ public final class MainActivity extends Activity {
             12,MediaDesign.MUTED,false);
         peers.setMaxLines(3);
         body.addView(peers,spaced(-1,-2,0,8));
-        AlertDialog dialog=themedDialog().setTitle("MediaShelf · загрузка")
-            .setView(body).setNegativeButton("Отмена",null).create();
+        AlertDialog.Builder builder=themedDialog()
+            .setTitle("MediaShelf · загрузка")
+            .setView(body).setNegativeButton("Отмена",null);
+        if(allowImmediateStart)builder.setNeutralButton("Смотреть сейчас",null);
+        AlertDialog dialog=builder.create();
         PlaybackProgress state=new PlaybackProgress(dialog,stage,speed,peers,progress);
         dialog.setOnShowListener(d->{
             dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v->state.cancel());
@@ -3162,7 +3168,7 @@ public final class MainActivity extends Activity {
             }
             return;
         }
-        PlaybackProgress state=progressWindow("Предзагрузка в буфер TorrServer…");
+        PlaybackProgress state=progressWindow("Предзагрузка в буфер TorrServer…",true);
         // TorrServer's preload target is configured in the server, not in
         // individual streaming URLs. Display the real reported target.
         state.peers.setText("Объём буфера задаётся в TorrServer. "+
@@ -3171,14 +3177,14 @@ public final class MainActivity extends Activity {
             try{Torr.drop(server,opened.hash);}
             catch(Exception ignored){}
         });
-        state.dialog.setButton(AlertDialog.BUTTON_NEUTRAL,"Смотреть сейчас",
-            (d,w)->{
-                if(state.active.getAndSet(false)){
-                    // Hand playback over to the player; a queued preload
-                    // callback must never launch the same stream again.
-                    launch(stream);
-                }
-            });
+        state.dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->{
+            if(state.active.getAndSet(false)){
+                state.dialog.dismiss();
+                // Hand playback over to the player; a queued preload
+                // callback must never launch the same stream again.
+                launch(stream);
+            }
+        });
         AtomicBoolean finished=new AtomicBoolean(false);
         final String[] failed={""};
         worker.execute(()->{
