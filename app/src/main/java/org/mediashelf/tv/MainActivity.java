@@ -707,6 +707,13 @@ public final class MainActivity extends Activity {
         updateFilters();
     }
 
+    @Override public boolean onKeyDown(int keyCode,android.view.KeyEvent event){
+        if(tvLayout && keyCode==android.view.KeyEvent.KEYCODE_MENU){
+            setSidebarCollapsed(!sidebarCollapsed,true);
+            return true;
+        }
+        return super.onKeyDown(keyCode,event);
+    }
     private void setSidebarCollapsed(boolean hide,boolean persist){
         if(!tvLayout)return;
         sidebarCollapsed=hide;
@@ -1524,6 +1531,7 @@ public final class MainActivity extends Activity {
             tile.addView(facts);
             tile.setOnClickListener(v->details(item));
             final int tileRow=i/columns;
+            final int tileColumn=i%columns;
             tile.setOnKeyListener((v,key,event)->{
                 if(event.getAction()!=android.view.KeyEvent.ACTION_DOWN)
                     return false;
@@ -1531,6 +1539,13 @@ public final class MainActivity extends Activity {
                     if(featuredHost!=null && featuredHost.getParent()!=null)
                         featuredHost.requestFocus();
                     else focusCurrentCategory();
+                    return true;
+                }
+                // TV convention: left from the first poster column reveals
+                // the collapsed navigation menu without using a touchscreen.
+                if(tvLayout && sidebarCollapsed && tileColumn==0 &&
+                    key==android.view.KeyEvent.KEYCODE_DPAD_LEFT){
+                    setSidebarCollapsed(false,true);
                     return true;
                 }
                 if(key==android.view.KeyEvent.KEYCODE_DPAD_CENTER ||
