@@ -3601,7 +3601,22 @@ public final class MainActivity extends Activity {
         }
         static void drop(String base,String hash) throws Exception {
             if(hash==null || !hash.matches("[0-9a-fA-F]{40}"))return;
-            post(base,new JSONObject().put("action","drop").put("hash",hash));
+            // The drop endpoint returns HTTP 200 with an EMPTY body.
+            // Do not use post(), which expects a JSON response.
+            HttpURLConnection c=(HttpURLConnection)new URL(
+                base.replaceAll("/+$","")+"/torrents").openConnection();
+            try{
+                c.setConnectTimeout(6000);
+                c.setReadTimeout(9000);
+                c.setRequestMethod("POST");
+                c.setDoOutput(true);
+                c.setRequestProperty("Content-Type","application/json; charset=UTF-8");
+                byte[] data=new JSONObject().put("action","drop")
+                    .put("hash",hash).toString().getBytes(StandardCharsets.UTF_8);
+                try(OutputStream out=c.getOutputStream()){out.write(data);}
+                if(c.getResponseCode()!=200)
+                    throw new IOException("TorrServer: не удалось остановить загрузку");
+            }finally{c.disconnect();}
         }
         static void triggerPreload(String stream,PlaybackProgress state) throws Exception {
             // Server-side preload uses its configured cache size and target.
