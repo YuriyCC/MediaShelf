@@ -124,9 +124,28 @@ final class SiteDetails {
         return value!=null && (value.startsWith("https://")||value.startsWith("http://"));
     }
     private static String imageSrc(Element picture) {
-        for(String key:new String[]{"abs:src","abs:data-src","abs:data-original","abs:data-lazy-src","abs:data-echo"}) {
+        // Prefer the full-resolution asset when a site displays a thumbnail in src.
+        Element anchor=picture.closest("a[href]");
+        if(anchor!=null){
+            String href=anchor.attr("abs:href");
+            if(validImageUrl(href) && href.matches("(?i).*\\.(?:jpg|jpeg|png|webp|avif)(?:[?#].*)?$"))
+                return href;
+        }
+        for(String key:new String[]{"abs:data-full","abs:data-original","abs:data-zoom",
+                "abs:data-src","abs:data-lazy-src","abs:data-echo","abs:src"}) {
             String url=picture.attr(key);
             if(validImageUrl(url))return url;
+        }
+        String srcset=picture.attr("srcset");
+        if(!srcset.isEmpty()){
+            String[] options=srcset.split(",");
+            for(int i=options.length-1;i>=0;i--){
+                String[] parts=options[i].trim().split("\\s+");
+                if(parts.length>0){
+                    String url=picture.absUrl(parts[0]);
+                    if(validImageUrl(url))return url;
+                }
+            }
         }
         return "";
     }
