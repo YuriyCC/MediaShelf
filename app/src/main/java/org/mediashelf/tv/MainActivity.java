@@ -115,6 +115,7 @@ public final class MainActivity extends Activity {
     private final Handler main = new Handler(Looper.getMainLooper());
     private SharedPreferences prefs;
     private FavoritesStore favorites;
+    private SavedSearches savedSearches;
     private boolean favoritesMode=false;
     private LinearLayout cards;
     private TextView status;
@@ -176,6 +177,7 @@ public final class MainActivity extends Activity {
         super.onCreate(saved);
         prefs=getSharedPreferences("local_settings",MODE_PRIVATE);
         favorites=new FavoritesStore(prefs);
+        savedSearches=new SavedSearches(prefs);
         int mode=getResources().getConfiguration().uiMode &
             android.content.res.Configuration.UI_MODE_TYPE_MASK;
         hardwareTv=mode==android.content.res.Configuration.UI_MODE_TYPE_TELEVISION;
@@ -1046,6 +1048,20 @@ public final class MainActivity extends Activity {
         LinearLayout wrap=column();
         wrap.setPadding(dp(19),dp(8),dp(19),dp(4));
         wrap.addView(search,lp(-1,53));
+        Button saveQuery=button("☆  Сохранить поиск");
+        saveQuery.setTextSize(14);
+        saveQuery.setTextColor(MediaDesign.ACCENT_LIGHT);
+        wrap.addView(saveQuery,spaced(-1,45,0,6));
+        saveQuery.setOnClickListener(v->{
+            String query=search.getText().toString().trim();
+            if(query.isEmpty()){
+                Toast.makeText(this,"Сначала введи слова поиска",Toast.LENGTH_SHORT).show();
+                return;
+            }
+            boolean added=savedSearches.add(query,activeSource,currentCategory,currentCategoryLabel);
+            Toast.makeText(this,added?"Сохранено в «Моих поисках»":
+                "Такой поиск уже сохранён",Toast.LENGTH_SHORT).show();
+        });
         AlertDialog dialog=themedDialog()
             .setTitle("Поиск · "+activeSource)
             .setView(wrap)
@@ -1580,6 +1596,65 @@ public final class MainActivity extends Activity {
         empty.addView(detail);
         cards.addView(empty,lp(-1,tvLayout?230:195));
     }
+    private void addSavedSearchRow(){
+        TextView caption=eyebrow("МОИ ПОИСКИ");
+        cards.addView(caption,spaced(-1,26,0,3));
+        List<SavedSearches.Entry> searches=savedSearches.all();
+        android.widget.HorizontalScrollView horizontal=new android.widget.HorizontalScrollView(this);
+        horizontal.setHorizontalScrollBarEnabled(false);
+        LinearLayout strip=line();
+        strip.setPadding(dp(3),dp(4),dp(8),dp(5));
+        if(searches.isEmpty()){
+            TextView empty=label("Добавь любимые слова через кнопку «Сохранить поиск»",
+                tvLayout?12:13,MediaDesign.MUTED,false);
+            strip.addView(empty,spaced(-1,42,0,0));
+        }
+        for(int i=0;i<searches.size();i++){
+            final int pos=i;
+            SavedSearches.Entry entry=searches.get(i);
+            Button chip=button("⌕  "+entry.query);
+            chip.setTextSize(tvLayout?13:12);
+            chip.setMaxWidth(dp(tvLayout?235:160));
+            chip.setSingleLine(true);
+            chip.setEllipsize(TextUtils.TruncateAt.END);
+            chip.setBackground(MediaDesign.outlined(this,0xff27203f,0xff684191,12,1));
+            chip.setOnClickListener(v->{
+                activeSource=entry.source;
+                prefs.edit().putString("indexer",activeSource).apply();
+                currentCategory=entry.category;
+                currentCategoryLabel=entry.categoryName;
+                if(tvLayout)renderSidebarNavigation();
+                if(queryInput!=null)queryInput.setText(entry.query);
+                load(entry.query,"search");
+            });
+            chip.setOnLongClickListener(v->{
+                String[] actions={"Переименовать","Сдвинуть влево","Сдвинуть вправо","Удалить"};
+                showSelectionDialog(entry.query,actions,(dlg,choice)->{
+                    if(choice==0){
+                        EditText name=new EditText(this);
+                        name.setText(entry.query);
+                        name.setSingleLine(true);
+                        name.setTextColor(MediaDesign.TEXT);
+                        themedDialog().setTitle("Переименовать поиск").setView(name)
+                            .setPositiveButton("Сохранить",(d,w)->{
+                                savedSearches.rename(pos,name.getText().toString());
+                                openFavorites();
+                            }).setNegativeButton("Отмена",null).show();
+                    }else if(choice==1||choice==2){
+                        savedSearches.move(pos,pos+(choice==1?-1:1));
+                        openFavorites();
+                    }else if(choice==3){
+                        savedSearches.remove(pos);
+                        openFavorites();
+                    }
+                },"Закрыть");
+                return true;
+            });
+            strip.addView(chip,spaced(tvLayout?205:140,43,7,0));
+        }
+        horizontal.addView(strip);
+        cards.addView(horizontal,spaced(-1,53,0,9));
+    }
     private void openFavorites(){
         favoritesMode=true;
         ++serial; // invalidate any running tracker request
@@ -1832,6 +1907,7 @@ public final class MainActivity extends Activity {
         heading.addView(number);
         cards.addView(heading,spaced(-1,
             compactTvPreview?32:tvLayout?37:60,0,compactTvPreview?2:5));
+        if(favoritesMode)addSavedSearchRow();
         TextView line=label("Показано "+Math.min(items.size(),visibleCount)+
             " · Страниц сайта: "+(sitePageCursor!=null?sitePageCursor.pageIndex:"—"),
             12,MediaDesign.MUTED,false);
