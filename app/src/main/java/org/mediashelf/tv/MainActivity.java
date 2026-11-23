@@ -103,6 +103,8 @@ public final class MainActivity extends Activity {
     private ScrollView catalogScroll;
     private final ExecutorService worker = Executors.newFixedThreadPool(4);
     private final ExecutorService metadataWorker = Executors.newFixedThreadPool(4);
+    // Separate bounded detail-fetch pool: image preloading must not starve search.
+    private final ExecutorService searchMetadataWorker = Executors.newFixedThreadPool(3);
     private final java.util.Set<Item> pendingPosterMetadata=
         java.util.Collections.newSetFromMap(
             new java.util.concurrent.ConcurrentHashMap<Item,Boolean>());
@@ -1742,6 +1744,7 @@ public final class MainActivity extends Activity {
             record.put("Link",item.download);
             record.put("Poster",item.poster);
             record.put("Description",item.description);
+            record.put("SearchMetadata",item.searchMetadata);
             record.put("PublishDate",item.date);
             record.put("Size",item.bytes);
             record.put("Seeders",item.seeders);
@@ -1749,108 +1752,155 @@ public final class MainActivity extends Activity {
         return record;
     }
     /**
-     * Scan independent queries for each word. A tracker can match "Blacked"
-     * and "Gangbang" on different pages; filtering a single first page loses
-     * valid results. Keep cursors to resume scanning without a page cap.
+     * Multi-word search uses each independent term as a discovery seed. For
+     * every discovered release inspect title first, then its OWN details page
+     * if needed. This avoids treating titles as the entire search index while
+     * keeping the scan incremental and its server requests bounded.
      */
     private static final class MultiWordSession {
         final String query;
+        final NativeSource source;
         final List<SitePages.Cursor> cursors=new ArrayList<>();
+        final java.util.ArrayDeque<Item> pending=new java.util.ArrayDeque<>();
+        final Set<String> seenCandidates=new HashSet<>();
         final List<Item> results=new ArrayList<>();
         final Set<String> found=new HashSet<>();
         final int category;
         final int id;
-        int scanned=0;
-        int nextIndex=0;
-        boolean running=false;
+        int scanned=0,inspected=0,unreadable=0,nextIndex=0;
+        volatile boolean running=false;
         String lastError="";
         MultiWordSession(String q,NativeSource source,int category,int id){
-            query=q;this.category=category;this.id=id;
+            query=q;this.source=source;this.category=category;this.id=id;
             for(String term:SearchTerms.words(q))
                 cursors.add(source.begin(term,category));
         }
         boolean hasMore(){
+            if(!pending.isEmpty())return true;
             for(SitePages.Cursor c:cursors)if(!c.finished)return true;
             return false;
         }
+        void accept(Item item){
+            if(SearchTerms.matchesContent(item,query) &&
+                found.add(catalogKey(item)))results.add(item);
+        }
+    }
+    private void publishMultiWord(MultiWordSession session){
+        final List<Item> snapshot=new ArrayList<>(session.results);
+        final int pages=session.scanned, checked=session.inspected,
+            skipped=session.unreadable;
+        final boolean more=session.hasMore(),active=session.running;
+        final String warning=session.lastError;
+        main.post(()->{
+            if(isFinishing() || session.id!=serial ||
+                multiWordSession!=session)return;
+            catalogItems.clear();
+            catalogItems.addAll(snapshot);
+            pageInfo="Поиск по названию, описанию и тегам · страниц "+pages+
+                " · проверено раздач "+checked+
+                " · найдено "+snapshot.size()+
+                (active?" · поиск продолжается":
+                 more?" · доступны следующие страницы":" · поиск завершён")+
+                (skipped>0?" · не удалось открыть "+skipped+" карточек":"")+
+                (!warning.isEmpty()?" · "+warning:"");
+            if(status!=null)status.setText("Поиск: "+session.query+
+                " · проверено "+checked+" · найдено "+snapshot.size());
+            show(catalogItems);
+        });
     }
     private void scanWords(MultiWordSession session,boolean initial){
         if(session.running)return;
         session.running=true;
         loadingNextPage=true;
         worker.execute(()->{
-            long deadline=android.os.SystemClock.elapsedRealtime()+
-                (initial?36000:28000);
-            int pageBudget=initial?20:14;
-            NativeSource source=NativeSources.get(
-                activeSource.equals("all")?"xxxclub":activeSource);
-            if(source==null)return;
-            int attempts=0;
+            final long deadline=android.os.SystemClock.elapsedRealtime()+
+                (initial?45000:34000);
+            final int pageBudget=initial?8:6,checkBudget=initial?56:48;
+            int fetchedPages=0,checkedNow=0;
             while(session.id==serial && session.hasMore() &&
-                  attempts<pageBudget &&
-                  android.os.SystemClock.elapsedRealtime()<deadline){
-                SitePages.Cursor cursor=null;
-                for(int seek=0;seek<session.cursors.size();seek++){
-                    int pos=(session.nextIndex+seek)%session.cursors.size();
-                    if(!session.cursors.get(pos).finished){
-                        cursor=session.cursors.get(pos);
-                        session.nextIndex=(pos+1)%session.cursors.size();
-                        break;
+                fetchedPages<pageBudget && checkedNow<checkBudget &&
+                android.os.SystemClock.elapsedRealtime()<deadline){
+                if(session.pending.isEmpty()){
+                    SitePages.Cursor cursor=null;
+                    for(int attempt=0;attempt<session.cursors.size();attempt++){
+                        int pos=(session.nextIndex+attempt)%session.cursors.size();
+                        if(!session.cursors.get(pos).finished){
+                            cursor=session.cursors.get(pos);
+                            session.nextIndex=(pos+1)%session.cursors.size();
+                            break;
+                        }
+                    }
+                    if(cursor==null)break;
+                    try{
+                        SitePages.Page page=session.source.fetchNext(
+                            cursor,session.category);
+                        session.scanned++;
+                        fetchedPages++;
+                        for(Item item:page.items){
+                            if(session.seenCandidates.add(catalogKey(item)))
+                                session.pending.addLast(item);
+                        }
+                    }catch(Exception ex){
+                        session.lastError=error(ex);
+                        session.unreadable++;
+                        // The page isn't verifiably exhausted; expose the
+                        // network error instead of claiming a complete search.
+                        cursor.finished=true;
+                        fetchedPages++;
+                    }
+                    publishMultiWord(session);
+                    continue;
+                }
+                final List<Item> batch=new ArrayList<>();
+                while(!session.pending.isEmpty() && batch.size()<8 &&
+                    checkedNow+batch.size()<checkBudget)
+                    batch.add(session.pending.removeFirst());
+                final List<java.util.concurrent.Future<Item>> futures=
+                    new ArrayList<>();
+                for(Item item:batch){
+                    if(SearchTerms.matchesContent(item,session.query) ||
+                        !session.source.canEnrich(item)){
+                        session.accept(item);
+                        session.inspected++;
+                        checkedNow++;
+                    }else{
+                        futures.add(searchMetadataWorker.submit(()->{
+                            session.source.enrich(item);
+                            return item;
+                        }));
                     }
                 }
-                if(cursor==null)break;
-                try{
-                    SitePages.Page page=source.fetchNext(cursor,session.category);
-                    session.scanned++;
-                    for(Item item:page.items){
-                        if(SearchTerms.matchesTitle(item.title,session.query) &&
-                            session.found.add(catalogKey(item)))
-                            session.results.add(item);
+                for(java.util.concurrent.Future<Item> future:futures){
+                    try{
+                        long remaining=deadline-
+                            android.os.SystemClock.elapsedRealtime();
+                        if(remaining<=0)
+                            throw new java.util.concurrent.TimeoutException(
+                                "Превышено время поиска");
+                        Item enriched=future.get(Math.min(13000,remaining),
+                            java.util.concurrent.TimeUnit.MILLISECONDS);
+                        if(enriched.detailsFetched)
+                            session.accept(enriched);
+                        else session.unreadable++;
+                    }catch(Exception ex){
+                        future.cancel(true);
+                        session.unreadable++;
                     }
-                }catch(Exception ex){
-                    session.lastError=error(ex);
-                    // A single provider failure must not leave an endless loop.
-                    cursor.finished=true;
+                    session.inspected++;
+                    checkedNow++;
                 }
-                attempts++;
-                // Streaming status once per page ensures the user never has to
-                // guess whether the search is still checking later pages.
-                final List<Item> snapshot=new ArrayList<>(session.results);
-                final int pages=session.scanned;
-                main.post(()->{
-                    if(isFinishing()||session.id!=serial||
-                       multiWordSession!=session)return;
-                    catalogItems.clear();
-                    catalogItems.addAll(snapshot);
-                    pageInfo="Поиск по всем словам · проверено страниц: "+pages+
-                        " · найдено: "+snapshot.size()+
-                        (session.hasMore()?" · поиск продолжается":" · поиск завершён");
-                    if(status!=null)status.setText("Поиск: "+session.query+
-                        " · страниц "+pages+" · найдено "+snapshot.size());
-                    show(catalogItems);
-                });
-                if(session.results.size()>=35)break;
+                publishMultiWord(session);
             }
-            main.post(()->{
-                if(isFinishing()||session.id!=serial||
-                    multiWordSession!=session)return;
-                session.running=false;
-                loadingNextPage=false;
-                pageInfo="Проверено страниц: "+session.scanned+
-                    " · найдено раздач с каждым словом: "+session.results.size()+
-                    (session.hasMore()?
-                        " · можно продолжить поиск по следующим страницам":
-                        " · доступные страницы проверены")+
-                    (session.lastError.isEmpty()?"":" · "+session.lastError);
-                show(catalogItems);
-            });
+            session.running=false;
+            loadingNextPage=false;
+            publishMultiWord(session);
         });
     }
     private static List<Item> filterByAndTerms(List<Item> incoming,String query){
         if(!SearchTerms.needsAndFilter(query))return incoming;
         List<Item> accepted=new ArrayList<>();
         for(Item item:incoming)
-            if(SearchTerms.matchesTitle(item.title,query))accepted.add(item);
+            if(SearchTerms.matchesContent(item,query))accepted.add(item);
         return accepted;
     }
     private void load(String q,String order) {
@@ -3371,6 +3421,7 @@ public final class MainActivity extends Activity {
         featuredHost=null;
         serial++;worker.shutdownNow();metadataWorker.shutdownNow();
         imageWorker.shutdownNow();fullImageWorker.shutdownNow();
+        searchMetadataWorker.shutdownNow();
         super.onDestroy();
     }
     private static String read(InputStream input) throws Exception {
@@ -3383,6 +3434,7 @@ public final class MainActivity extends Activity {
         final String title,tracker,details,date;
         volatile String magnet,download;
         volatile String poster,description,imageError="";
+        volatile String searchMetadata="";
         volatile boolean detailsFetched=false;
         volatile java.util.List<String> screenshots=java.util.Collections.emptyList();
         final long bytes;final int seeders;
@@ -3390,7 +3442,9 @@ public final class MainActivity extends Activity {
             title=get(j,"Title","title");tracker=get(j,"Tracker","tracker");
             magnet=get(j,"MagnetUri","magnetUri");download=get(j,"Link","link");
             details=get(j,"Details","details");poster=get(j,"Poster","CoverUrl","coverurl");
-            description=get(j,"Description","description");date=get(j,"PublishDate","publishDate");
+            description=get(j,"Description","description");
+            searchMetadata=get(j,"SearchMetadata","searchMetadata");
+            date=get(j,"PublishDate","publishDate");
             bytes=j.optLong("Size",0);seeders=j.optInt("Seeders",0);
         }
         String link(){return !magnet.isEmpty()?magnet:download;}
