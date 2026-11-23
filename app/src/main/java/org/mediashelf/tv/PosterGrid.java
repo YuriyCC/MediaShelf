@@ -13,7 +13,7 @@ final class PosterGrid {
     }
     static Size calculate(int screenWidthDp,int sidebarWidthDp,
         boolean sidebarHidden,boolean compactPreview,boolean tvLayout) {
-        int side=tvLayout&&!sidebarHidden?sidebarWidthDp:0;
+        int side=tvLayout?(sidebarHidden?(compactPreview?46:54):sidebarWidthDp):0;
         int padding=compactPreview?25:tvLayout?43:48;
         int usable=Math.max(238,screenWidthDp-side-padding);
         int spacing=compactPreview?7:tvLayout?9:10;
