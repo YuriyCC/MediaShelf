@@ -1455,7 +1455,9 @@ public final class MainActivity extends Activity {
         return record;
     }
     private void load(String q,String order) {
+        boolean wasFavorites=favoritesMode;
         favoritesMode=false;
+        if(wasFavorites && tvLayout && sidebarNavigation!=null)renderSidebarNavigation();
         lastQuery=q;
         lastSort=order;
         focusItemAfterLoad=-1;
