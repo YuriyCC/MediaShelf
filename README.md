@@ -183,3 +183,18 @@ Build checks: CI must run `testDebugUnitTest assembleRelease`. UI layout and foc
 Новые файлы: `FeaturedSelector.java` и `FeaturedSelectorTest.java`; 9 независимых тестов исключения паков, пустых постеров, нулевых сидов, ранжирования и дублей. Старые 15 тестов пагинации продолжают выполняться.
 
 Версия Android `1.4`, без `test`, код 14; package `org.mediashelf.tv`, подпись прежним личным сертификатом. Автоматическая сборка `testDebugUnitTest assembleRelease`; живую работу баннера и управление пультом необходимо дополнительно проверить на устройстве.
+
+## MediaShelf 1.5 — compact TV interface, remote focus and configurable homepage banner
+
+From an actual Android TV photo provided by the user and a comparison to Lampa's dense, laconic media catalog:
+- **Removed oversized "Медиатека" title and full-width TV search input.** The TV now shows a compact MediaShelf top toolbar (site selector, search icon, banner settings icon, settings icon). A D-pad/remote-friendly search dialog provides keyword search and direct return to latest releases. The full search field remains on touch-phone layout.
+- **Reduced TV sidebar and posters.** Sidebar ~176dp instead of 240dp, compact labels, 5–8 poster cards per row depending on actual dp width; titles limited to two lines on TV. Source menu, categories, playback and posters still work; responsive compact landscape-phone TV-preview retained.
+- **Compact rotating carousel**: TV height 132dp instead of 228dp; no large call-to-action button. Manual arrows, five indicator dots and focus-aware 7.5s autoplay retained.
+- **Banner category selection**: TV top star and sidebar "Настройка баннера" open a multi-select dialog for native site categories (novelties—all, film/DVD, 720p, 1080p, 4K, SD, packs, photo, VR). The default is "Новинки — все разделы" rather than "Фильмы".
+- **Banner topic filter**: optional free-text query e.g. "Gangbang", combining category selection with the site's own exact native category search path. Independent per-source local preferences; no password or server requirement.
+- **True-newest selection**: retains the native site's latest ordering, not an artificial ranking by seeders or 4K. Excludes dead seeds/posterless entries; by default filters MegaPACK and similar collections, but explicitly selected collection/photo/VR categories can populate the banner.
+- **Remote up-navigation repaired**: grid rows use explicit focus IDs and DPAD-UP returns from first row to the banner or category chips; from banner up to chips, and from chips up to the top-bar search. Carousel controls also have up/down key routes.
+- **No reuse of fabricated content:** posters and titles are real XXXClub site data only. Search and native cursor paging architecture unchanged.
+- **Version**: 1.5 (no "-test"), versionCode 15, package org.mediashelf.tv and stable private signing certificate unchanged.
+
+Validation: `gradle testDebugUnitTest assembleRelease` in GitHub Actions. Added BannerSettingsTest and additional FeaturedSelector tests. Native TV focus, source availability and video player require user device testing and cannot be claimed verified by CI alone.
