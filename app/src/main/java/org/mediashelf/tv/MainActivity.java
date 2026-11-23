@@ -3512,6 +3512,24 @@ public final class MainActivity extends Activity {
                 try(InputStream in=c.getInputStream()){return new JSONObject(read(in));}
             } finally {c.disconnect();}
         }
+        static JSONObject status(String base,String hash) throws Exception {
+            return post(base,new JSONObject().put("action","get").put("hash",hash));
+        }
+        static void triggerPreload(String stream) throws Exception {
+            // Server-side preload uses its configured cache size and target.
+            String link=stream.replace("&play","&preload&stat");
+            HttpURLConnection c=(HttpURLConnection)new URL(link).openConnection();
+            try{
+                c.setConnectTimeout(10000);
+                c.setReadTimeout(180000);
+                c.setRequestProperty("User-Agent",SiteDetails.USER_AGENT);
+                if(c.getResponseCode()!=200)
+                    throw new IOException("TorrServer HTTP "+c.getResponseCode());
+                try(InputStream input=c.getInputStream()){
+                    read(input);
+                }
+            }finally{c.disconnect();}
+        }
         static Opened open(String base,Item item) throws Exception {
             if(!base.startsWith("http"))throw new IllegalArgumentException("Неверный адрес TorrServer");
             String link=item.link();if(link.isEmpty())throw new IllegalArgumentException("У раздачи нет magnet или torrent-ссылки");
