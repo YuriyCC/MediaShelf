@@ -501,9 +501,16 @@ public final class MainActivity extends Activity {
             LinearLayout sidebar=column();
             sidebarPanel=sidebar;
             sidebarNavigation=column();
+            outer.setClipChildren(false);
+            sidebar.setClipChildren(false);
+            sidebar.setClipToPadding(false);
+            sidebarNavigation.setClipChildren(false);
+            sidebarNavigation.setClipToPadding(false);
             sidebar.setBackground(MediaDesign.horizontal(this,
                 new int[]{0xff111628,0xff0c1424},0));
             ScrollView navScroll=new ScrollView(this);
+            navScroll.setClipChildren(false);
+            navScroll.setClipToPadding(false);
             navScroll.setVerticalScrollBarEnabled(false);
             navScroll.setFillViewport(false);
             navScroll.addView(sidebarNavigation);
@@ -716,7 +723,12 @@ public final class MainActivity extends Activity {
                     MediaDesign.outlined(this,0xff35205f,
                         MediaDesign.ACCENT,11,1):
                     MediaDesign.round(this,0xff121a2c,11));
-            MediaDesign.animateFocus(b,f);
+            // Keep TV rail buttons at scale 1.0: 1.035 scaling cut focused
+            // corners and strokes against the left edge of the sidebar.
+            b.animate().cancel();
+            b.setScaleX(1f);
+            b.setScaleY(1f);
+            b.setElevation(f?dp(4):0);
         });
         b.setOnKeyListener((v,key,event)->{
             if(event.getAction()!=android.view.KeyEvent.ACTION_DOWN)
@@ -742,9 +754,9 @@ public final class MainActivity extends Activity {
     private void renderSidebarNavigation(){
         if(!tvLayout||sidebarNavigation==null)return;
         sidebarNavigation.removeAllViews();
-        sidebarPanel.setPadding(dp(sidebarCollapsed?4:compactTvPreview?6:9),
+        sidebarPanel.setPadding(dp(sidebarCollapsed?5:compactTvPreview?8:12),
             dp(compactTvPreview?5:11),
-            dp(sidebarCollapsed?4:compactTvPreview?6:9),
+            dp(sidebarCollapsed?5:compactTvPreview?8:12),
             dp(compactTvPreview?4:9));
         sidebarToggleButton=addSidebarEntry("☰","MediaShelf",
             ()->setSidebarCollapsed(!sidebarCollapsed,true),false);
@@ -1579,6 +1591,14 @@ public final class MainActivity extends Activity {
         if(tvLayout&&sidebarNavigation!=null)renderSidebarNavigation();
         if(catalogScroll!=null)catalogScroll.scrollTo(0,0);
         show(catalogItems);
+        // The selected Favorites entry was removed and rebuilt above. Without
+        // restoring focus, Android chooses an unrelated button (e.g. Settings).
+        if(tvLayout && navFavoritesButton!=null)
+            navFavoritesButton.post(()->{
+                if(!isFinishing() && favoritesMode &&
+                    navFavoritesButton!=null && navFavoritesButton.isAttachedToWindow())
+                    navFavoritesButton.requestFocus();
+            });
     }
     private JSONObject favoriteRecord(Item item){
         JSONObject record=new JSONObject();
