@@ -69,4 +69,34 @@ public class FeaturedSelectorTest {
             film("Movie C 1080p",10));
         assertEquals(FeaturedSelector.select(rows,3),FeaturedSelector.select(rows,3));
     }
+    @Test public void newestCarouselPreservesSiteOrderInsteadOfPopularity(){
+        List<FeaturedSelector.Candidate> entries=Arrays.asList(
+            film("New Film 720p",5),
+            film("Old Film 4K",333),
+            film("Another New Release 1080p",50));
+        assertEquals(Arrays.asList(0,1,2),
+            FeaturedSelector.selectNewest(entries,5,false));
+    }
+    @Test public void allNewReleasesExcludeMegaPack(){
+        List<FeaturedSelector.Candidate> entries=Arrays.asList(
+            film("MegaPACK - 329 Videos 1080p",333),
+            film("New Clip 1080p",2));
+        assertEquals(Arrays.asList(1),
+            FeaturedSelector.selectNewest(entries,5,false));
+    }
+    @Test public void explicitlySelectedPacksCanAppearInBanner(){
+        List<FeaturedSelector.Candidate> entries=Arrays.asList(
+            film("MegaPACK 1080p",3),
+            film("Regular Film 1080p",8));
+        assertEquals(Arrays.asList(0,1),
+            FeaturedSelector.selectNewest(entries,5,true));
+    }
+    @Test public void newestBannerStillRejectsBrokenPosters(){
+        List<FeaturedSelector.Candidate> entries=Arrays.asList(
+            film("New Movie",2,"","one"),
+            film("Release with cover",1,"https://img.net/real.jpg","two"));
+        assertEquals(Arrays.asList(1),
+            FeaturedSelector.selectNewest(entries,5,true));
+    }
+
 }
