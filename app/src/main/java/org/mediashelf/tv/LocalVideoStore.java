@@ -77,6 +77,42 @@ final class LocalVideoStore {
         }
         throw new IOException("Слишком много одинаковых файлов");
     }
+    static File resumableTarget(File folder,String raw,String hash,long size)
+        throws IOException{
+        String safe=safeName(raw);
+        File first=new File(folder,safe);
+        File partial=new File(folder,safe+".part");
+        File metadata=new File(folder,safe+".part.info");
+        if(!first.exists() && partial.isFile() && metadata.isFile() &&
+            partial.length()>0 && (size<=0 || partial.length()<size)){
+            try{
+                String saved=new String(java.nio.file.Files.readAllBytes(
+                    metadata.toPath()),java.nio.charset.StandardCharsets.UTF_8);
+                if(saved.equals(hash+"\n"+size+"\n"))return first;
+            }catch(Exception ignored){}
+        }
+        return uniqueTarget(folder,raw);
+    }
+    static void writeDownloadMarker(File target,String hash,long size)
+        throws IOException{
+        File marker=new File(target.getAbsolutePath()+".part.info");
+        try(java.io.FileOutputStream output=new java.io.FileOutputStream(marker)){
+            output.write((hash+"\n"+size+"\n").getBytes(
+                java.nio.charset.StandardCharsets.UTF_8));
+            output.flush();
+        }
+    }
+    static List<File> incomplete(Context context){
+        List<File> files=new ArrayList<>();
+        for(Volume v:volumes(context)){
+            File[] list=v.folder.listFiles();
+            if(list!=null)for(File file:list)
+                if(file.isFile() && file.getName().endsWith(".part") &&
+                    file.length()>0)files.add(file);
+        }
+        files.sort(Comparator.comparingLong(File::lastModified).reversed());
+        return files;
+    }
     static boolean isVideo(File file){
         if(file==null || !file.isFile() || file.getName().endsWith(".part"))
             return false;
