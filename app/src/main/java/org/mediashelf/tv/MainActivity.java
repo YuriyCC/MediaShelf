@@ -1225,6 +1225,8 @@ public final class MainActivity extends Activity {
         field.setTextColor(WHITE);
         field.setHint("например: mypornclub");
         field.setHintTextColor(MUTED);
+        field.setBackground(MediaDesign.outlined(this,0xff1a263b,0xff483376,12,1));
+        field.setPadding(dp(14),dp(9),dp(12),dp(9));
         field.setText(activeSource.equals("all")?"":activeSource);
         field.setSelectAllOnFocus(true);
         LinearLayout wrapper=column();
@@ -2550,7 +2552,9 @@ public final class MainActivity extends Activity {
         TextView label=label(caption,14,MUTED,true);parent.addView(label);
         EditText field=new EditText(this);field.setText(value);field.setTextColor(WHITE);field.setSingleLine(true);
         field.setInputType(secret ? (InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD) : (InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI));
-        parent.addView(field,lp(-1,49));return field;
+        field.setBackground(MediaDesign.outlined(this,0xff1a263b,0xff483376,12,1));
+        field.setPadding(dp(14),0,dp(12),0);
+        parent.addView(field,spaced(-1,49,0,10));return field;
     }
     private void settings(boolean first) {
         LinearLayout root=column();
