@@ -90,3 +90,9 @@
 - DPAD-UP теперь имеет явную цепочку карточки→баннер→категории→поиск. Для остальных рядов назначен фокус вверх на карточку предыдущего ряда.
 - Размеры 5–8 обложек на ТВ зависят от логической ширины/плотности экранного режима.
 - Панель сайта и настройки компактны, как у современных телевизионных медиатек. Это не копия кода Lampa.
+
+## 1.6 — unified television navigation rail
+- The list of sources is now accessed through a single "Источники" entry rather than taking the entire TV sidebar.
+- Compact icon rail 54dp is persistent. Expanded 176dp rail shows labels and does not overlay the cards.
+- All global actions migrated to the rail. Touch UI retains original controls.
+- D-pad navigation and poster grid geometry updated; `PosterGridTest` checks collapse effect.

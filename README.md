@@ -198,3 +198,18 @@ From an actual Android TV photo provided by the user and a comparison to Lampa's
 - **Version**: 1.5 (no "-test"), versionCode 15, package org.mediashelf.tv and stable private signing certificate unchanged.
 
 Validation: `gradle testDebugUnitTest assembleRelease` in GitHub Actions. Added BannerSettingsTest and additional FeaturedSelector tests. Native TV focus, source availability and video player require user device testing and cannot be claimed verified by CI alone.
+
+## MediaShelf 1.6 — unified TV navigation rail
+
+Based on the user's actual Android TV screenshots and comparative Lampa screenshot. Instead of copying a proprietary UI, version 1.6 applies proven lean-back navigation: focusable left rail/drawer, compact context breadcrumb, and more content visible per row.
+
+- Collapsed navigation rail is ~54dp wide on TV (~46dp in phone TV preview) and remains available at all times. Expanded rail is 176dp on TV, labels visible; collapse default for installations without a prior preference. Persist `sidebar_hidden` preference.
+- Search, Novelties (home), Popular, Categories, Sources, Banner setup, Connections/Settings and Diagnostics are all located inside the same side rail. The phone TV preview additionally offers an exit to touch-phone mode.
+- On Android TV removes the duplicated upper header (MediaShelf/selector/search/settings row), the full-width search field, and the long horizontal filter strip. Only a tiny single-line source/section breadcrumb remains above the catalog. Portrait-touch phones keep their familiar search and controls.
+- The native XXXClub search dialog, categories, site selection, TorrServer and user-configurable carousel continue unchanged.
+- The actual card grid is recalculated to account for the ALWAYS-visible collapsed icon rail, rather than pretending the sidebar width is 0. Unit tests verify that the collapse yields additional cards per row and preserves safe card widths on TV and phone preview.
+- D-pad LEFT from a first-column card focuses the rail Search button. D-pad RIGHT from the rail returns to featured banner or first film card; DPAD UP from top row → banner (if present) → side search. Menu remote key toggles collapsed state. Back from an expanded menu collapses it; Back again leaves the app.
+- Layout changes do not refetch content, log out accounts, overwrite TorrServer settings or reset selected source; scroll offset and selected source remain.
+- No copied code or assets from Kinopoisk/Lampa/Plex; source is native Android and uses MediaShelf branding and original functionality.
+
+App display name and version: `MediaShelf`, `1.6` without `-test`, versionCode 16. Application ID `org.mediashelf.tv`, same private signing certificate. CI performs JVM unit tests before assembling release APK. Actual TV remote/device verification is still required.
