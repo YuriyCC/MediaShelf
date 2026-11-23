@@ -2425,115 +2425,153 @@ public final class MainActivity extends Activity {
             });
         }else showDetails(item);
     }
+    /**
+     * TV-oriented detail page: poster, compact actions and release facts
+     * together; screenshot preview to the right; technical MediaInfo collapsed.
+     */
     private void showDetails(Item item) {
-        // Replace the content with a dedicated film page, like a TV media library.
-        // Back restores the existing catalog views, focus and scroll offset.
         LinearLayout page=column();
         page.setBackgroundColor(MediaDesign.BG);
         LinearLayout toolbar=line();
         toolbar.setPadding(dp(tvLayout?22:12),dp(8),dp(12),dp(8));
-        Button goBack=button("‹  Назад");
-        goBack.setTextSize(14);
-        goBack.setOnClickListener(v->onBackPressed());
-        toolbar.addView(goBack,spaced(tvLayout?120:93,43,12,0));
+        Button back=button("‹  Назад");
+        back.setTextSize(14);
+        back.setOnClickListener(v->onBackPressed());
+        toolbar.addView(back,spaced(tvLayout?120:93,43,12,0));
         TextView path=label("MediaShelf   /   "+item.tracker,14,MediaDesign.MUTED,false);
         path.setSingleLine(true);
         path.setEllipsize(TextUtils.TruncateAt.END);
         toolbar.addView(path,new LinearLayout.LayoutParams(0,dp(43),1));
         page.addView(toolbar,spaced(-1,59,0,0));
 
-        View topLine=new View(this);
-        topLine.setBackgroundColor(0xff30284a);
-        page.addView(topLine,lp(-1,1));
-
+        View divider=new View(this);
+        divider.setBackgroundColor(0xff30284a);
+        page.addView(divider,lp(-1,1));
         ScrollView scroll=new ScrollView(this);
         scroll.setFillViewport(true);
         scroll.setVerticalScrollBarEnabled(false);
         LinearLayout root=column();
-        root.setPadding(dp(tvLayout?24:14),dp(tvLayout?22:14),
-                        dp(tvLayout?24:14),dp(34));
+        root.setPadding(dp(tvLayout?20:13),dp(tvLayout?18:13),
+                        dp(tvLayout?20:13),dp(30));
         root.setBackground(MediaDesign.gradient(this,
-            new int[]{0xff1a1933,0xff101629,0xff080e1b},18));
-        int maxDp=tvLayout?Math.min(1130,
-            getResources().getConfiguration().screenWidthDp-70):
-            getResources().getConfiguration().screenWidthDp-14;
-        android.widget.FrameLayout.LayoutParams bodyParams=
-            new android.widget.FrameLayout.LayoutParams(dp(maxDp),-2,
-                Gravity.TOP|Gravity.CENTER_HORIZONTAL);
-        scroll.addView(root,bodyParams);
+            new int[]{0xff24163d,0xff15172b,0xff080e1b},18));
+        int screenDp=getResources().getConfiguration().screenWidthDp;
+        int contentDp=tvLayout?Math.min(1160,screenDp-60):screenDp-12;
+        android.widget.FrameLayout.LayoutParams body=new android.widget.FrameLayout.LayoutParams(
+            dp(contentDp),-2,Gravity.TOP|Gravity.CENTER_HORIZONTAL);
+        scroll.addView(root,body);
 
-        LinearLayout head=line();
-        head.setGravity(Gravity.TOP);
-        int posterWidth=tvLayout?230:112;
-        int posterHeight=tvLayout?310:158;
-        LinearLayout posterColumn=column();
+        boolean hasPhotos=!item.screenshots.isEmpty();
+        // On normal TVs the gallery fits alongside the poster and title.
+        // Narrow layouts put it directly below the title, before MediaInfo.
+        boolean sideGallery=tvLayout && hasPhotos && contentDp>=780;
+        int posterW=tvLayout?(sideGallery?185:218):106;
+        int posterH=tvLayout?(sideGallery?254:296):148;
+        int galleryW=sideGallery?Math.max(225,Math.min(302,contentDp/3)):0;
+        LinearLayout header=line();
+        header.setGravity(Gravity.TOP);
+        header.setClipChildren(false);
+
         ImageView poster=new ImageView(this);
-        poster.setBackground(MediaDesign.gradient(this,
-            new int[]{0xff304567,0xff1a2940},15));
         poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        poster.setTag(item);
+        poster.setBackground(MediaDesign.gradient(this,
+            new int[]{0xff304567,0xff1a2940},13));
         poster.setClipToOutline(true);
-        posterColumn.addView(poster,spaced(posterWidth,posterHeight,0,8));
+        poster.setTag(item);
+        header.addView(poster,spaced(posterW,posterH,tvLayout?18:12,0));
         loadPoster(poster,item,false);
-
-        LinearLayout posterButtons=line();
-        Button watch=accentButton("▶");
-        watch.setTextSize(tvLayout?20:16);
-        watch.setContentDescription("Смотреть");
-        watch.setEnabled(!item.link().isEmpty());
-        watch.setAlpha(watch.isEnabled()?1:0.55f);
-        posterButtons.addView(watch,new LinearLayout.LayoutParams(0,dp(42),1));
-        JSONObject record=favoriteRecord(item);
-        Button bookmark=button(favorites.contains(record)?"★":"☆");
-        bookmark.setTextSize(tvLayout?24:19);
-        bookmark.setContentDescription(favorites.contains(record)?
-            "Убрать из избранного":"Добавить в избранное");
-        bookmark.setTextColor(MediaDesign.ACCENT_LIGHT);
-        LinearLayout.LayoutParams favParams=new LinearLayout.LayoutParams(0,dp(42),1);
-        favParams.leftMargin=dp(7);
-        posterButtons.addView(bookmark,favParams);
-        posterColumn.addView(posterButtons,lp(posterWidth,42));
-        head.addView(posterColumn,spaced(posterWidth,-2,tvLayout?24:14,0));
 
         LinearLayout facts=column();
         facts.addView(eyebrow("РАЗДАЧА  /  "+item.tracker.toUpperCase(Locale.ROOT)),
-            spaced(-1,23,0,9));
-        TextView title=label(item.title,tvLayout?28:18,MediaDesign.TEXT,true);
-        title.setMaxLines(tvLayout?7:6);
+            spaced(-1,24,0,8));
+        TextView title=label(item.title,tvLayout?24:18,MediaDesign.TEXT,true);
+        title.setMaxLines(tvLayout?6:5);
         title.setEllipsize(TextUtils.TruncateAt.END);
-        facts.addView(title,spaced(-1,-2,0,tvLayout?20:13));
+        facts.addView(title,spaced(-1,-2,0,tvLayout?16:11));
+
         LinearLayout tags=line();
         String quality=MediaDesign.quality(item.title);
         if(!quality.isEmpty())
-            tags.addView(MediaDesign.tag(this,quality,MediaDesign.ACCENT_LIGHT,0xff39245b),
-                spaced(-2,-2,6,0));
+            tags.addView(MediaDesign.tag(this,quality,MediaDesign.ACCENT_LIGHT,
+                0xff39245b),spaced(-2,-2,7,0));
         tags.addView(MediaDesign.tag(this,item.size(),MediaDesign.TEXT,0xff30466b),
-            spaced(-2,-2,6,0));
+            spaced(-2,-2,7,0));
         if(item.seeders>0)
             tags.addView(MediaDesign.tag(this,"● "+item.seeders+" сидов",
                 MediaDesign.SUCCESS,0xff233a3f));
-        facts.addView(tags,spaced(-1,38,0,12));
+        facts.addView(tags,spaced(-1,36,0,13));
         TextView origin=label("ИСТОЧНИК  ·  "+item.tracker+"\n"+
             (item.date.isEmpty()?"":"ДОБАВЛЕНО  ·  "+item.date),
             tvLayout?13:11,MediaDesign.MUTED,false);
         origin.setMaxLines(3);
-        facts.addView(origin,spaced(-1,-2,0,13));
+        facts.addView(origin,spaced(-1,-2,0,15));
+
+        // One row inside the text column prevents the website action from
+        // overlapping the poster and gives Play/Favorite the same dimensions.
+        LinearLayout actions=line();
+        actions.setClipChildren(false);
+        actions.setGravity(Gravity.LEFT|Gravity.CENTER_VERTICAL);
+        Button watch=accentButton("▶");
+        watch.setGravity(Gravity.CENTER);
+        watch.setTextSize(tvLayout?19:16);
+        watch.setContentDescription("Смотреть");
+        watch.setEnabled(!item.link().isEmpty());
+        watch.setAlpha(watch.isEnabled()?1:0.55f);
+        actions.addView(watch,spaced(tvLayout?54:49,44,0,0));
+
+        JSONObject record=favoriteRecord(item);
+        Button bookmark=button(favorites.contains(record)?"★":"☆");
+        bookmark.setGravity(Gravity.CENTER);
+        bookmark.setTextSize(tvLayout?20:17);
+        bookmark.setContentDescription(favorites.contains(record)?
+            "Убрать из избранного":"Добавить в избранное");
+        bookmark.setTextColor(MediaDesign.ACCENT_LIGHT);
+        actions.addView(bookmark,spaced(tvLayout?54:49,44,8,0));
+
         Button site=button("На сайте ↗");
-        site.setTextSize(12);
+        site.setGravity(Gravity.CENTER);
+        site.setTextSize(tvLayout?12:11);
         site.setEnabled(!item.details.isEmpty());
-        facts.addView(site,spaced(tvLayout?135:107,37,0,0));
-        head.addView(facts,new LinearLayout.LayoutParams(0,-2,1));
-        root.addView(head,spaced(-1,-2,0,22));
+        actions.addView(site,spaced(tvLayout?117:97,44,8,0));
+        facts.addView(actions,spaced(-1,52,0,0));
+
+        header.addView(facts,new LinearLayout.LayoutParams(0,-2,1));
+        if(sideGallery)header.addView(
+            buildDetailsGallery(item,galleryW),spaced(galleryW,-2,14,0));
+        root.addView(header,spaced(-1,-2,0,18));
+        if(hasPhotos && !sideGallery)
+            root.addView(buildDetailsGallery(item,contentDp-(tvLayout?42:24)),
+                spaced(-1,-2,0,15));
+
+        View line=new View(this);
+        line.setBackgroundColor(0xff40305a);
+        root.addView(line,spaced(-1,1,0,12));
+        Button technical=button("▸  О раздаче");
+        technical.setTextSize(tvLayout?14:13);
+        technical.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
+        technical.setPadding(dp(15),0,dp(8),0);
+        root.addView(technical,spaced(-1,44,0,6));
+        TextView description=label(item.description.isEmpty()?
+            "Дополнительные технические сведения пока не опубликованы.":
+            readableMediaInfo(item.description),tvLayout?13:12,
+            MediaDesign.MUTED,false);
+        description.setLineSpacing(dp(3),1.05f);
+        description.setPadding(dp(13),dp(10),dp(13),dp(11));
+        description.setBackground(MediaDesign.round(this,0xff141e32,11));
+        description.setVisibility(View.GONE);
+        root.addView(description,spaced(-1,-2,0,8));
+        technical.setOnClickListener(v->{
+            boolean opening=description.getVisibility()!=View.VISIBLE;
+            description.setVisibility(opening?View.VISIBLE:View.GONE);
+            technical.setText(opening?"▾  О раздаче":"▸  О раздаче");
+        });
 
         watch.setOnClickListener(v->play(item));
         bookmark.setOnClickListener(v->{
-            boolean added=favorites.toggle(favoriteRecord(item));
-            bookmark.setText(added?"★":"☆");
-            bookmark.setContentDescription(added?
+            boolean saved=favorites.toggle(favoriteRecord(item));
+            bookmark.setText(saved?"★":"☆");
+            bookmark.setContentDescription(saved?
                 "Убрать из избранного":"Добавить в избранное");
-            if(favoritesMode)
-                Toast.makeText(this,added?"Добавлено":"Удалено из избранного",
-                    Toast.LENGTH_SHORT).show();
         });
         site.setOnClickListener(v->{
             if(item.details.isEmpty())return;
@@ -2543,45 +2581,94 @@ public final class MainActivity extends Activity {
                     Toast.LENGTH_LONG).show();
             }
         });
-
-        View separator=new View(this);
-        separator.setBackgroundColor(0xff3c3454);
-        root.addView(separator,spaced(-1,1,0,17));
-        root.addView(eyebrow("О РАЗДАЧЕ"),spaced(-1,24,0,5));
-        TextView description=label(item.description.isEmpty()?
-            "Описание не опубликовано или пока не удалось получить его с сайта.":
-            item.description,tvLayout?15:13,0xffd2dcee,false);
-        description.setLineSpacing(dp(4),1f);
-        root.addView(description,spaced(-1,-2,0,22));
-
-        if(!item.screenshots.isEmpty()){
-            root.addView(eyebrow("ДОПОЛНИТЕЛЬНЫЕ ФОТО"),spaced(-1,31,0,3));
-            android.widget.HorizontalScrollView gallery=
-                new android.widget.HorizontalScrollView(this);
-            gallery.setHorizontalScrollBarEnabled(false);
-            LinearLayout images=line();
-            for(String imageUrl:item.screenshots){
-                ImageView still=new ImageView(this);
-                still.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                still.setBackground(MediaDesign.round(this,0xff233149,12));
-                still.setClipToOutline(true);
-                still.setFocusable(true);
-                still.setClickable(true);
-                images.addView(still,spaced(tvLayout?202:135,tvLayout?125:91,11,9));
-                loadImage(still,imageUrl,referer(item),null,false);
-                still.setOnFocusChangeListener((v,focused)->MediaDesign.animateFocus(v,focused));
-                still.setOnClickListener(v->showFullPhoto(item,imageUrl));
-            }
-            gallery.addView(images);
-            root.addView(gallery,spaced(-1,tvLayout?151:119,0,10));
-        }
         page.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         detailsPage=page;
         fullPhotoPage=null;
         setContentView(page);
-        if(tvLayout)(watch.isEnabled()?watch:bookmark).post(
-            ()->(watch.isEnabled()?watch:bookmark).requestFocus());
+        if(tvLayout){
+            Button focusTarget=watch.isEnabled()?watch:bookmark;
+            focusTarget.post(focusTarget::requestFocus);
+        }
     }
+
+    private static String readableMediaInfo(String raw){
+        if(raw==null)return "";
+        return raw.replaceAll(
+            "(?i)\\s+(Release Name|Screenshots|MediaInfo|File name|File size|Duration|Video|Audio|Resolution|Frame rate|Bitrate)\\s*:",
+            "\n$1:").trim();
+    }
+
+    /** A remote-friendly photo navigator with preview directly on the movie page. */
+    private LinearLayout buildDetailsGallery(Item item,int widthDp){
+        LinearLayout gallery=column();
+        gallery.setBackground(MediaDesign.round(this,0xff111a2b,13));
+        gallery.setPadding(dp(8),dp(9),dp(8),dp(8));
+        TextView headline=eyebrow("ДОПОЛНИТЕЛЬНЫЕ ФОТО");
+        gallery.addView(headline,spaced(-1,25,0,5));
+        ImageView preview=new ImageView(this);
+        preview.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        preview.setBackground(MediaDesign.round(this,0xff09101f,12));
+        preview.setClipToOutline(true);
+        preview.setFocusable(true);
+        preview.setClickable(true);
+        final String[] selected={item.screenshots.get(0)};
+        final int[] selectedPosition={0};
+        int previewHeight=tvLayout?188:155;
+        gallery.addView(preview,spaced(-1,previewHeight,0,7));
+
+        TextView index=label("",12,MediaDesign.MUTED,false);
+        index.setGravity(Gravity.RIGHT|Gravity.CENTER_VERTICAL);
+        gallery.addView(index,spaced(-1,19,0,5));
+        Runnable update=()->{
+            index.setText((selectedPosition[0]+1)+" / "+item.screenshots.size()+
+                "   ·   OK — открыть");
+            preview.setImageDrawable(null);
+            loadImage(preview,selected[0],referer(item),null,false,true);
+        };
+        preview.setOnClickListener(v->showFullPhoto(item,selected[0]));
+        preview.setOnFocusChangeListener((v,focused)->{
+            preview.setBackground(focused?
+                MediaDesign.outlined(this,0xff151b33,MediaDesign.ACCENT,12,2):
+                MediaDesign.round(this,0xff09101f,12));
+        });
+        android.widget.HorizontalScrollView strip=new android.widget.HorizontalScrollView(this);
+        strip.setHorizontalScrollBarEnabled(false);
+        strip.setClipToPadding(false);
+        strip.setClipChildren(false);
+        LinearLayout thumbs=line();
+        thumbs.setClipChildren(false);
+        int thumbWidth=Math.max(60,Math.min(79,(widthDp-18)/3));
+        int thumbHeight=tvLayout?57:53;
+        for(int i=0;i<item.screenshots.size();i++){
+            final int position=i;
+            final String url=item.screenshots.get(i);
+            ImageView thumb=new ImageView(this);
+            thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            thumb.setClipToOutline(true);
+            thumb.setFocusable(true);
+            thumb.setClickable(true);
+            thumb.setContentDescription("Фото "+(i+1)+" из "+item.screenshots.size());
+            thumb.setBackground(MediaDesign.round(this,0xff263149,8));
+            thumbs.addView(thumb,spaced(thumbWidth,thumbHeight,6,0));
+            loadImage(thumb,url,referer(item),null,false);
+            thumb.setOnFocusChangeListener((v,focused)->{
+                thumb.setBackground(focused?
+                    MediaDesign.outlined(this,0xff39235a,MediaDesign.ACCENT,8,2):
+                    MediaDesign.round(this,0xff263149,8));
+                if(focused){
+                    selected[0]=url;
+                    selectedPosition[0]=position;
+                    update.run();
+                }
+            });
+            thumb.setOnClickListener(v->showFullPhoto(item,url));
+        }
+        strip.addView(thumbs);
+        gallery.addView(strip,spaced(-1,thumbHeight+8,0,0));
+        update.run();
+        return gallery;
+    }
+
     private void showFullPhoto(Item item,String photoUrl){
         LinearLayout page=column();
         page.setBackgroundColor(0xff03050c);
