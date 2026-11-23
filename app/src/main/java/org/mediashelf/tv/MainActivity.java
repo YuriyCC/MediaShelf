@@ -143,6 +143,7 @@ public final class MainActivity extends Activity {
     private int serial = 0;
     private String lastQuery = "";
     private String lastSort = "latest";
+    private int catalogSortMode=0;
 
     private int dp(float value) { return (int)(getResources().getDisplayMetrics().density * value + 0.5f); }
     private GradientDrawable panel(int bg, boolean focus) {
@@ -198,6 +199,7 @@ public final class MainActivity extends Activity {
         prefs=getSharedPreferences("local_settings",MODE_PRIVATE);
         favorites=new FavoritesStore(prefs);
         savedSearches=new SavedSearches(prefs);
+        catalogSortMode=Math.max(0,Math.min(4,prefs.getInt("catalog_sort_mode",0)));
         int mode=getResources().getConfiguration().uiMode &
             android.content.res.Configuration.UI_MODE_TYPE_MASK;
         hardwareTv=mode==android.content.res.Configuration.UI_MODE_TYPE_TELEVISION;
@@ -2256,6 +2258,34 @@ public final class MainActivity extends Activity {
         heading.addView(number);
         cards.addView(heading,spaced(-1,
             compactTvPreview?32:tvLayout?37:60,0,compactTvPreview?2:5));
+        // One compact sorting control for TV remotes and phone touch alike.
+        LinearLayout sortingBar=line();
+        sortingBar.setGravity(Gravity.CENTER_VERTICAL);
+        TextView sortCaption=label("ПОРЯДОК КАРТОЧЕК",tvLayout?11:10,
+            MediaDesign.MUTED,true);
+        sortingBar.addView(sortCaption,new LinearLayout.LayoutParams(0,
+            dp(tvLayout?39:43),1));
+        String[] sortingLabels={"Как на сайте","По названию А—Я",
+            "По названию Я—А","По имени без префикса А—Я",
+            "По имени без префикса Я—А"};
+        Button sortingButton=button("⇅  "+sortingLabels[catalogSortMode]+"  ▾");
+        sortingButton.setTextSize(tvLayout?12:12);
+        sortingButton.setSingleLine(true);
+        sortingButton.setEllipsize(TextUtils.TruncateAt.END);
+        sortingButton.setTextColor(MediaDesign.ACCENT_LIGHT);
+        sortingButton.setBackground(MediaDesign.outlined(this,0xff211a3e,
+            0xff70499a,11,1));
+        sortingButton.setOnClickListener(v->showSelectionDialog(
+            "Сортировка постеров",sortingLabels,(dlg,choice)->{
+                if(choice<0||choice>=sortingLabels.length)return;
+                if(catalogSortMode==choice)return;
+                catalogSortMode=choice;
+                prefs.edit().putInt("catalog_sort_mode",choice).apply();
+                show(catalogItems);
+            },"Отмена"));
+        sortingBar.addView(sortingButton,spaced(
+            tvLayout?(compactTvPreview?188:278):207,tvLayout?39:43,0,0));
+        cards.addView(sortingBar,spaced(-1,tvLayout?42:48,0,8));
         if(favoritesMode)addSavedSearchRow();
         if(!favoritesMode && SearchTerms.needsAndFilter(lastQuery) &&
             multiWordSession==null &&
@@ -2334,10 +2364,12 @@ public final class MainActivity extends Activity {
         grid.setClipToPadding(false);
         grid.setPadding(dp(2),dp(4),dp(2),dp(5));
         cards.addView(grid);
-        int limit=Math.min(visibleCount,items.size());
+        List<Item> displayed=SmartTitleSort.sorted(items,item->item.title,
+            catalogSortMode);
+        int limit=Math.min(visibleCount,displayed.size());
 
         for(int i=0;i<limit;i++){
-            Item item=items.get(i);
+            Item item=displayed.get(i);
             LinearLayout tile=column();
             tile.setBackground(MediaDesign.round(this,MediaDesign.SURFACE,10));
             tile.setPadding(dp(compactTvPreview?3:tvLayout?4:6),
@@ -2536,7 +2568,12 @@ public final class MainActivity extends Activity {
 
         int height=compactTvPreview?98:tvLayout?132:160;
         featuredPoster=new ImageView(this);
-        featuredPoster.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        // Never crop a portrait/oversized release image to a tiny banner slice.
+        // FIT_CENTER preserves every pixel and allows letterboxing over the
+        // same dark-purple visual background as the surrounding banner.
+        featuredPoster.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        featuredPoster.setBackground(MediaDesign.horizontal(this,
+            new int[]{0xff392064,0xff17172c},14));
         android.widget.FrameLayout.LayoutParams artParams=
             new android.widget.FrameLayout.LayoutParams(
                 dp(compactTvPreview?180:tvLayout?300:180),-1,
