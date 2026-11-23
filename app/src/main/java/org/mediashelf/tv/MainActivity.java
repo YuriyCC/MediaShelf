@@ -1299,6 +1299,7 @@ public final class MainActivity extends Activity {
         return m;
     }
     private void show(List<Item> items) {
+        firstCatalogTile=null;
         int oldScroll=resetCatalogScroll?0:
             catalogScroll==null?0:catalogScroll.getScrollY();
         boolean resetThisDraw=resetCatalogScroll;
@@ -1316,25 +1317,28 @@ public final class MainActivity extends Activity {
             currentCategoryLabel:lastQuery.isEmpty()?
                 lastSort.equals("popular")?"ПОПУЛЯРНОЕ":"НОВЫЕ РАЗДАЧИ":
                 "ПОИСК ПО КАТАЛОГУ";
-        left.addView(eyebrow(category.toUpperCase(Locale.ROOT)));
-        TextView caption=label(lastQuery.isEmpty()?"Подборка из каталога":
-                "Результаты: "+lastQuery,tvLayout?22:19,MediaDesign.TEXT,true);
+        if(!tvLayout)left.addView(eyebrow(category.toUpperCase(Locale.ROOT)));
+        TextView caption=label(lastQuery.isEmpty()?
+                (currentCategory>0?currentCategoryLabel:
+                    lastSort.equals("popular")?"Популярное":"Новинки"):
+                "Поиск: "+lastQuery,tvLayout?17:19,MediaDesign.TEXT,true);
         caption.setMaxLines(2);
         caption.setEllipsize(TextUtils.TruncateAt.END);
-        caption.setTextSize(compactTvPreview?15:tvLayout?22:19);
+        caption.setTextSize(compactTvPreview?14:tvLayout?17:19);
         left.addView(caption);
         heading.addView(left,new LinearLayout.LayoutParams(0,
-            dp(compactTvPreview?38:56),1));
+            dp(compactTvPreview?30:tvLayout?35:56),1));
         TextView number=MediaDesign.tag(this,items.size()+" найдено",
             MediaDesign.ACCENT_LIGHT,0xff39245b);
         heading.addView(number);
-        cards.addView(heading,spaced(-1,compactTvPreview?39:60,0,compactTvPreview?2:5));
+        cards.addView(heading,spaced(-1,
+            compactTvPreview?32:tvLayout?37:60,0,compactTvPreview?2:5));
         TextView line=label("Показано "+Math.min(items.size(),visibleCount)+
             " · Страниц сайта: "+(sitePageCursor!=null?sitePageCursor.pageIndex:"—"),
             12,MediaDesign.MUTED,false);
-        if(!compactTvPreview)cards.addView(line,spaced(-1,24,0,8));
+        if(!tvLayout)cards.addView(line,spaced(-1,24,0,8));
 
-        if(!pageInfo.isEmpty() && !compactTvPreview){
+        if(!pageInfo.isEmpty() && (!tvLayout || items.isEmpty())){
             TextView note=label(pageInfo,12,0xff8fa8d1,false);
             note.setMaxLines(2);
             note.setEllipsize(TextUtils.TruncateAt.END);
@@ -1360,15 +1364,15 @@ public final class MainActivity extends Activity {
             return;
         }
         int screen=getResources().getConfiguration().screenWidthDp;
-        int usable=Math.max(240,screen-(compactTvPreview?
-            Math.max(122,Math.min(150,screen/5))+28:tvLayout?314:48));
-        int spacing=compactTvPreview?8:tvLayout?14:10;
-        int columns=compactTvPreview?Math.max(3,Math.min(6,usable/87)):
-            tvLayout?Math.max(3,Math.min(6,usable/186)):2;
+        int usable=Math.max(238,screen-(compactTvPreview?
+            Math.max(120,Math.min(146,screen/5))+23:tvLayout?210:48));
+        int spacing=compactTvPreview?7:tvLayout?10:10;
+        int columns=compactTvPreview?Math.max(4,Math.min(7,usable/90)):
+            tvLayout?Math.max(5,Math.min(8,usable/125)):2;
         int cardWidth=Math.max(compactTvPreview?65:126,
             (usable-columns*spacing-6)/columns);
         int coverHeight=(int)(cardWidth*
-            (compactTvPreview?0.84f:tvLayout?1.25f:1.12f));
+            (compactTvPreview?1.05f:tvLayout?1.29f:1.12f));
         GridLayout grid=new GridLayout(this);
         grid.setColumnCount(columns);
         grid.setClipChildren(false);
@@ -1380,18 +1384,19 @@ public final class MainActivity extends Activity {
         for(int i=0;i<limit;i++){
             Item item=items.get(i);
             LinearLayout tile=column();
-            tile.setBackground(MediaDesign.round(this,MediaDesign.SURFACE,17));
-            tile.setPadding(dp(compactTvPreview?3:6),
-                dp(compactTvPreview?3:6),dp(compactTvPreview?3:6),
-                dp(compactTvPreview?5:10));
+            tile.setBackground(MediaDesign.round(this,MediaDesign.SURFACE,10));
+            tile.setPadding(dp(compactTvPreview?3:tvLayout?4:6),
+                dp(compactTvPreview?3:tvLayout?4:6),
+                dp(compactTvPreview?3:tvLayout?4:6),
+                dp(compactTvPreview?4:tvLayout?5:10));
             tile.setClickable(true);tile.setFocusable(true);
             tile.setContentDescription(item.title+"; "+item.size()+
                 "; сидов "+item.seeders+"; "+item.tracker);
             tile.setOnFocusChangeListener((v,f)->{
                 tile.setBackground(f?
                     MediaDesign.outlined(this,0xff2a3d5f,
-                        MediaDesign.ACCENT,17,2):
-                    MediaDesign.round(this,MediaDesign.SURFACE,17));
+                        MediaDesign.ACCENT,10,2):
+                    MediaDesign.round(this,MediaDesign.SURFACE,10));
                 MediaDesign.animateFocus(tile,f);
             });
             android.widget.FrameLayout cover=new android.widget.FrameLayout(this);
@@ -1427,15 +1432,16 @@ public final class MainActivity extends Activity {
             tile.addView(cover,lp(-1,coverHeight));
             loadPoster(image,item,i<24);
 
-            TextView title=label(item.title,compactTvPreview?10:tvLayout?14:13,
+            TextView title=label(item.title,
+                compactTvPreview?10:tvLayout?12:13,
                 MediaDesign.TEXT,true);
-            title.setMaxLines(compactTvPreview?2:3);
+            title.setMaxLines(tvLayout?2:3);
             title.setEllipsize(TextUtils.TruncateAt.END);
-            title.setPadding(dp(compactTvPreview?3:7),
-                dp(compactTvPreview?4:10),dp(3),0);
+            title.setPadding(dp(compactTvPreview?3:tvLayout?4:7),
+                dp(compactTvPreview?4:tvLayout?5:10),dp(3),0);
             tile.addView(title,new LinearLayout.LayoutParams(-1,0,1));
             TextView facts=label(item.size()+"  ·  "+item.tracker,
-                compactTvPreview?9:11,MediaDesign.MUTED,false);
+                compactTvPreview?9:tvLayout?10:11,MediaDesign.MUTED,false);
             facts.setSingleLine(true);
             facts.setEllipsize(TextUtils.TruncateAt.END);
             facts.setPadding(dp(compactTvPreview?3:7),dp(compactTvPreview?2:5),0,0);
@@ -1452,9 +1458,9 @@ public final class MainActivity extends Activity {
             GridLayout.LayoutParams p=new GridLayout.LayoutParams(
                 GridLayout.spec(i/columns),GridLayout.spec(i%columns));
             p.width=dp(cardWidth);
-            p.height=dp(coverHeight+(compactTvPreview?48:tvLayout?99:88));
+            p.height=dp(coverHeight+(compactTvPreview?49:tvLayout?61:88));
             p.rightMargin=dp(spacing);
-            p.bottomMargin=dp(compactTvPreview?8:tvLayout?16:12);
+            p.bottomMargin=dp(compactTvPreview?7:tvLayout?11:12);
             grid.addView(tile,p);
             if(i==focusItemAfterLoad){
                 focusItemAfterLoad=-1;
@@ -1527,12 +1533,12 @@ public final class MainActivity extends Activity {
                 details(featuredItems.get(featuredIndex));
         });
 
-        int height=compactTvPreview?130:tvLayout?228:185;
+        int height=compactTvPreview?98:tvLayout?132:160;
         featuredPoster=new ImageView(this);
         featuredPoster.setScaleType(ImageView.ScaleType.CENTER_CROP);
         android.widget.FrameLayout.LayoutParams artParams=
             new android.widget.FrameLayout.LayoutParams(
-                dp(compactTvPreview?195:tvLayout?400:180),-1,
+                dp(compactTvPreview?180:tvLayout?300:180),-1,
                 Gravity.RIGHT|Gravity.TOP);
         hero.addView(featuredPoster,artParams);
         View tint=new View(this);
@@ -1544,61 +1550,65 @@ public final class MainActivity extends Activity {
         copy.setGravity(Gravity.CENTER_VERTICAL);
         copy.setPadding(dp(compactTvPreview?12:tvLayout?30:17),
             dp(compactTvPreview?8:14),dp(3),dp(compactTvPreview?11:17));
-        featuredEyebrow=eyebrow("ФИЛЬМЫ · ПОДБОРКА MEDIASHELF");
-        featuredEyebrow.setTextSize(compactTvPreview?9:11);
-        copy.addView(featuredEyebrow,spaced(-1,compactTvPreview?17:25,0,3));
-        featuredTitle=label("Подбираем фильмы",compactTvPreview?16:tvLayout?26:19,
+        featuredEyebrow=eyebrow("НОВИНКИ · ПОДБОРКА MEDIASHELF");
+        featuredEyebrow.setTextSize(compactTvPreview?8:tvLayout?9:11);
+        copy.addView(featuredEyebrow,spaced(-1,
+            compactTvPreview?15:tvLayout?18:25,0,1));
+        featuredTitle=label("Загружаем новинки",
+            compactTvPreview?14:tvLayout?17:19,
             MediaDesign.TEXT,true);
-        featuredTitle.setMaxLines(compactTvPreview?2:3);
+        featuredTitle.setMaxLines(2);
         featuredTitle.setEllipsize(TextUtils.TruncateAt.END);
         copy.addView(featuredTitle,new LinearLayout.LayoutParams(-1,0,1));
-        featuredMeta=label("Проверяем постеры и доступность",compactTvPreview?10:13,
+        featuredMeta=label("Проверяем новинки",
+            compactTvPreview?9:tvLayout?11:13,
             0xffd7d2ea,false);
         featuredMeta.setMaxLines(1);
         featuredMeta.setEllipsize(TextUtils.TruncateAt.END);
-        copy.addView(featuredMeta,spaced(-1,compactTvPreview?18:26,0,3));
-        if(!compactTvPreview){
-            TextView opening=MediaDesign.tag(this,"ОТКРЫТЬ ФИЛЬМ   ›",
-                Color.WHITE,0xff7529dc);
-            copy.addView(opening,new LinearLayout.LayoutParams(-2,dp(31)));
-        }
+        copy.addView(featuredMeta,spaced(-1,
+            compactTvPreview?16:tvLayout?18:26,0,2));
+        // The entire banner itself is clickable; no oversized CTA button.
         android.widget.FrameLayout.LayoutParams textParams=
             new android.widget.FrameLayout.LayoutParams(
                 dp(compactTvPreview?
                     Math.max(182,(getResources().getConfiguration().screenWidthDp-150)/2):
-                    tvLayout?485:245),-1,Gravity.LEFT|Gravity.TOP);
+                    tvLayout?355:245),-1,Gravity.LEFT|Gravity.TOP);
         hero.addView(copy,textParams);
 
         LinearLayout navigation=line();
         navigation.setGravity(Gravity.CENTER_VERTICAL);
-        navigation.setPadding(dp(7),dp(3),dp(7),dp(3));
+        navigation.setPadding(dp(3),dp(1),dp(3),dp(1));
         navigation.setBackground(MediaDesign.round(this,0xdc18152b,13));
         Button back=button("‹");
-        back.setTextSize(compactTvPreview?20:26);
+        back.setTextSize(compactTvPreview?18:tvLayout?20:26);
         back.setContentDescription("Предыдущий фильм");
         back.setPadding(0,0,0,0);
         back.setOnClickListener(v->advanceCarousel(-1));
-        navigation.addView(back,lp(compactTvPreview?28:39,compactTvPreview?28:36));
+        navigation.addView(back,lp(
+            compactTvPreview?24:tvLayout?29:39,compactTvPreview?23:tvLayout?27:36));
         featuredDots=label("",compactTvPreview?12:13,MediaDesign.ACCENT_LIGHT,true);
         featuredDots.setGravity(Gravity.CENTER);
         featuredDots.setContentDescription("Номер фильма в карусели");
-        navigation.addView(featuredDots,lp(compactTvPreview?65:93,
-            compactTvPreview?27:36));
+        navigation.addView(featuredDots,lp(
+            compactTvPreview?60:tvLayout?74:93,
+            compactTvPreview?23:tvLayout?27:36));
         Button forward=button("›");
-        forward.setTextSize(compactTvPreview?20:26);
+        forward.setTextSize(compactTvPreview?18:tvLayout?20:26);
         forward.setContentDescription("Следующий фильм");
         forward.setPadding(0,0,0,0);
         forward.setOnClickListener(v->advanceCarousel(1));
-        navigation.addView(forward,lp(compactTvPreview?28:39,compactTvPreview?28:36));
+        navigation.addView(forward,lp(
+            compactTvPreview?24:tvLayout?29:39,compactTvPreview?23:tvLayout?27:36));
         featuredControls=navigation;
         android.widget.FrameLayout.LayoutParams navParams=
             new android.widget.FrameLayout.LayoutParams(-2,-2,
                 Gravity.RIGHT|Gravity.BOTTOM);
         navParams.setMargins(0,0,dp(compactTvPreview?7:13),
-            dp(compactTvPreview?6:11));
+            dp(compactTvPreview?5:tvLayout?7:11));
         hero.addView(navigation,navParams);
 
-        cards.addView(hero,spaced(-1,height,0,compactTvPreview?11:tvLayout?23:18));
+        cards.addView(hero,spaced(-1,height,0,
+            compactTvPreview?8:tvLayout?12:18));
         renderCarouselSlide();
     }
 
@@ -1607,12 +1617,12 @@ public final class MainActivity extends Activity {
             featuredHost.getParent()==null)return;
         if(featuredItems.isEmpty()){
             featuredTitle.setText(featuredLoading?
-                "Подбираем фильмы с обложками":
-                "Подборка фильмов пока недоступна");
+                "Загружаем новинки":
+                "Новинки для баннера не найдены");
             featuredMeta.setText(featuredLoading?
-                "Загружаем из раздела «Фильмы»":
-                "Каталог работает. Проверь подключение к разделу «Фильмы»");
-            featuredEyebrow.setText("ФИЛЬМЫ · ПОДБОРКА MEDIASHELF");
+                "Настройки баннера: ✦":
+                "Выбери другую рубрику или тему: ✦";
+            featuredEyebrow.setText("НОВИНКИ · ПОДБОРКА MEDIASHELF");
             if(featuredPoster!=null){
                 featuredPoster.setTag(null);
                 featuredPoster.setImageDrawable(null);
@@ -1626,7 +1636,7 @@ public final class MainActivity extends Activity {
         featuredTitle.setText(movie.title);
         String quality=MediaDesign.quality(movie.title);
         featuredEyebrow.setText("НОВИНКИ · "+BannerSettings.summary(bannerCats(),bannerTopic()));
-        featuredMeta.setText((quality.isEmpty()?"Фильм":quality)+"  ·  "+
+        featuredMeta.setText((quality.isEmpty()?"Новинка":quality)+"  ·  "+
             movie.seeders+" раздающих  ·  "+movie.size());
         featuredControls.setVisibility(featuredItems.size()>1?View.VISIBLE:View.GONE);
         StringBuilder dots=new StringBuilder();
