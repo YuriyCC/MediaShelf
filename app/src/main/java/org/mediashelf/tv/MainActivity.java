@@ -88,6 +88,7 @@ public final class MainActivity extends Activity {
     private int sidebarWidthDp;
     private Button bannerSettingsButton;
     private View firstCatalogTile;
+    private Button catalogSortButton;
     private boolean tvLayout;
     private boolean tvPreviewMode;
     private boolean compactTvPreview;
@@ -709,6 +710,8 @@ public final class MainActivity extends Activity {
                 if(key==android.view.KeyEvent.KEYCODE_DPAD_DOWN){
                     if(featuredHost!=null && featuredHost.getParent()!=null)
                         featuredHost.requestFocus();
+                    else if(catalogSortButton!=null)
+                        catalogSortButton.requestFocus();
                     else if(firstCatalogTile!=null)
                         firstCatalogTile.requestFocus();
                     return true;
@@ -927,7 +930,8 @@ public final class MainActivity extends Activity {
                 View target=favoritesMode && firstSavedSearchButton!=null?
                     firstSavedSearchButton:
                     featuredHost!=null && featuredHost.getParent()!=null?
-                    featuredHost:firstCatalogTile;
+                    featuredHost:catalogSortButton!=null?catalogSortButton:
+                    firstCatalogTile;
                 if(target!=null){target.requestFocus();return true;}
             }
             if(key==android.view.KeyEvent.KEYCODE_DPAD_LEFT &&
@@ -2291,6 +2295,7 @@ public final class MainActivity extends Activity {
         main.removeCallbacks(carouselAdvance);
         cards.removeAllViews();
         firstSavedSearchButton=null;
+        catalogSortButton=null;
         featuredHost=null;
 
         if(!favoritesMode && !items.isEmpty() && isHomepage())
@@ -2335,6 +2340,21 @@ public final class MainActivity extends Activity {
         sortingButton.setTextColor(MediaDesign.ACCENT_LIGHT);
         sortingButton.setBackground(MediaDesign.outlined(this,0xff211a3e,
             0xff70499a,11,1));
+        catalogSortButton=sortingButton;
+        sortingButton.setOnKeyListener((v,key,event)->{
+            if(event.getAction()!=android.view.KeyEvent.ACTION_DOWN)return false;
+            if(key==android.view.KeyEvent.KEYCODE_DPAD_DOWN &&
+                firstCatalogTile!=null){
+                firstCatalogTile.requestFocus();return true;
+            }
+            if(key==android.view.KeyEvent.KEYCODE_DPAD_UP){
+                if(featuredHost!=null && featuredHost.getParent()!=null)
+                    featuredHost.requestFocus();
+                else focusCurrentCategory();
+                return true;
+            }
+            return false;
+        });
         sortingButton.setOnClickListener(v->showSelectionDialog(
             "Сортировка постеров",sortingLabels,(dlg,choice)->{
                 if(choice<0||choice>=sortingLabels.length)return;
@@ -2342,6 +2362,8 @@ public final class MainActivity extends Activity {
                 catalogSortMode=choice;
                 prefs.edit().putInt("catalog_sort_mode",choice).apply();
                 show(catalogItems);
+                if(tvLayout && catalogSortButton!=null)
+                    catalogSortButton.post(()->catalogSortButton.requestFocus());
             },"Отмена"));
         sortingBar.addView(sortingButton,spaced(
             tvLayout?(compactTvPreview?188:278):207,tvLayout?39:43,0,0));
@@ -2441,6 +2463,8 @@ public final class MainActivity extends Activity {
             if(i>=columns)tile.setNextFocusUpId(tileIds.get(i-columns));
             else if(favoritesMode && firstSavedSearchButton!=null)
                 tile.setNextFocusUpId(firstSavedSearchButton.getId());
+            else if(catalogSortButton!=null)
+                tile.setNextFocusUpId(catalogSortButton.getId());
             else if(featuredHost!=null)tile.setNextFocusUpId(featuredHost.getId());
             else if(!filterButtons.isEmpty())
                 tile.setNextFocusUpId(filterButtons.get(0).getId());
@@ -2519,6 +2543,8 @@ public final class MainActivity extends Activity {
                 if(key==android.view.KeyEvent.KEYCODE_DPAD_UP && tileRow==0){
                     if(favoritesMode && firstSavedSearchButton!=null)
                         firstSavedSearchButton.requestFocus();
+                    else if(catalogSortButton!=null)
+                        catalogSortButton.requestFocus();
                     else if(featuredHost!=null && featuredHost.getParent()!=null)
                         featuredHost.requestFocus();
                     else focusCurrentCategory();
@@ -2602,7 +2628,8 @@ public final class MainActivity extends Activity {
                 focusCurrentCategory();return true;
             }
             if(key==android.view.KeyEvent.KEYCODE_DPAD_DOWN){
-                if(firstCatalogTile!=null)firstCatalogTile.requestFocus();
+                if(catalogSortButton!=null)catalogSortButton.requestFocus();
+                else if(firstCatalogTile!=null)firstCatalogTile.requestFocus();
                 return true;
             }
             if(key==android.view.KeyEvent.KEYCODE_DPAD_LEFT){
