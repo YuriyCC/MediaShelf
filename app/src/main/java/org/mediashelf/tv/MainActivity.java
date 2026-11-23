@@ -60,6 +60,10 @@ public final class MainActivity extends Activity {
     private TextView sourceSummary;
     private Button sourceSelector;
     private Button topSearchButton;
+    private Button sidebarToggleButton;
+    private LinearLayout sidebarPanel;
+    private boolean sidebarCollapsed;
+    private int sidebarWidthDp;
     private Button bannerSettingsButton;
     private View firstCatalogTile;
     private boolean tvLayout;
@@ -426,6 +430,11 @@ public final class MainActivity extends Activity {
             (screenWidthDp<960 || screenHeightDp<650);
         tvLayout=hardwareTv || tvPreviewMode ||
             (screenWidthDp>=840 && screenHeightDp>=550);
+        sidebarCollapsed=tvLayout && prefs.getBoolean("sidebar_hidden",false);
+        sidebarWidthDp=compactTvPreview?
+            Math.max(120,Math.min(146,screenWidthDp/5)):176;
+        sidebarPanel=null;
+        sidebarToggleButton=null;
         filterButtons.clear();filterCodes.clear();
         getWindow().setStatusBarColor(MediaDesign.BG);
         getWindow().setNavigationBarColor(MediaDesign.BG);
@@ -444,6 +453,7 @@ public final class MainActivity extends Activity {
         outer.requestFocus();
         if(tvLayout){
             LinearLayout sidebar=column();
+            sidebarPanel=sidebar;
             sidebar.setPadding(dp(compactTvPreview?7:9),
                 dp(compactTvPreview?8:13),dp(compactTvPreview?7:9),
                 dp(compactTvPreview?7:10));
@@ -520,8 +530,8 @@ public final class MainActivity extends Activity {
                 foot.setPadding(dp(10),dp(19),0,0);
                 sidebar.addView(foot);
             }
-            outer.addView(sidebar,lp(compactTvPreview?
-                Math.max(120,Math.min(146,screenWidthDp/5)):176,-1));
+            outer.addView(sidebar,lp(sidebarWidthDp,-1));
+            sidebar.setVisibility(sidebarCollapsed?View.GONE:View.VISIBLE);
         }
         LinearLayout app=column();
         app.setPadding(dp(compactTvPreview?9:tvLayout?18:16),
@@ -531,6 +541,25 @@ public final class MainActivity extends Activity {
 
         LinearLayout header=line();
         header.setGravity(Gravity.CENTER_VERTICAL);
+        if(tvLayout){
+            sidebarToggleButton=button(sidebarCollapsed?"☰":"❮");
+            sidebarToggleButton.setId(View.generateViewId());
+            sidebarToggleButton.setTextSize(compactTvPreview?19:23);
+            sidebarToggleButton.setContentDescription(sidebarCollapsed?
+                "Показать левое меню":"Скрыть левое меню");
+            sidebarToggleButton.setOnClickListener(v->
+                setSidebarCollapsed(!sidebarCollapsed,true));
+            sidebarToggleButton.setOnKeyListener((v,key,event)->{
+                if(event.getAction()!=android.view.KeyEvent.ACTION_DOWN)return false;
+                if(key==android.view.KeyEvent.KEYCODE_DPAD_DOWN){
+                    focusCurrentCategory();return true;
+                }
+                return false;
+            });
+            header.addView(sidebarToggleButton,spaced(
+                compactTvPreview?35:43,compactTvPreview?34:40,
+                compactTvPreview?4:9,0));
+        }
         LinearLayout headerTitles=column();
         TextView mainTitle=label(tvLayout?"MediaShelf":"MediaShelf",
             tvLayout?(compactTvPreview?16:19):24,MediaDesign.TEXT,true);
@@ -678,6 +707,29 @@ public final class MainActivity extends Activity {
         updateFilters();
     }
 
+    private void setSidebarCollapsed(boolean hide,boolean persist){
+        if(!tvLayout)return;
+        sidebarCollapsed=hide;
+        if(persist)prefs.edit().putBoolean("sidebar_hidden",hide).apply();
+        if(sidebarPanel!=null)
+            sidebarPanel.setVisibility(hide?View.GONE:View.VISIBLE);
+        if(sidebarToggleButton!=null){
+            sidebarToggleButton.setText(hide?"☰":"❮");
+            sidebarToggleButton.setContentDescription(hide?
+                "Показать левое меню":"Скрыть левое меню");
+        }
+        // Recompute actual card dimensions and column count, without reloading
+        // the tracker or changing search/query/category state.
+        final int previousScroll=catalogScroll==null?0:catalogScroll.getScrollY();
+        if(catalogScroll!=null && !catalogItems.isEmpty()){
+            catalogScroll.post(()->{
+                if(isFinishing())return;
+                show(catalogItems);
+                catalogScroll.post(()->catalogScroll.scrollTo(0,previousScroll));
+                if(sidebarToggleButton!=null)sidebarToggleButton.requestFocus();
+            });
+        }else if(sidebarToggleButton!=null)sidebarToggleButton.requestFocus();
+    }
     private void updateFilters(){
         boolean nativeSource=activeSource.equals("xxxclub")||activeSource.equals("all");
         for(int i=0;i<filterButtons.size();i++){
@@ -1382,13 +1434,19 @@ public final class MainActivity extends Activity {
             return;
         }
         int screen=getResources().getConfiguration().screenWidthDp;
-        int usable=Math.max(238,screen-(compactTvPreview?
-            Math.max(120,Math.min(146,screen/5))+23:tvLayout?210:48));
-        int spacing=compactTvPreview?7:tvLayout?10:10;
-        int columns=compactTvPreview?Math.max(4,Math.min(7,usable/90)):
-            tvLayout?Math.max(5,Math.min(8,usable/125)):2;
-        int cardWidth=Math.max(compactTvPreview?65:126,
-            (usable-columns*spacing-6)/columns);
+        int leftSidebar=tvLayout&&!sidebarCollapsed?sidebarWidthDp:0;
+        int layoutPadding=compactTvPreview?25:tvLayout?43:48;
+        int usable=Math.max(238,screen-leftSidebar-layoutPadding);
+        int spacing=compactTvPreview?7:tvLayout?9:10;
+        // Sidebar collapse really adds room for more film posters.
+        // Keep a minimum practical poster width rather than stretching 3-4
+        // cards across the full screen.
+        int target=compactTvPreview?92:tvLayout?119:160;
+        int maxCols=compactTvPreview?8:tvLayout?11:2;
+        int columns=tvLayout?
+            Math.max(3,Math.min(maxCols,usable/target)):2;
+        int cardWidth=Math.max(compactTvPreview?58:tvLayout?86:126,
+            (usable-columns*spacing-8)/columns);
         int coverHeight=(int)(cardWidth*
             (compactTvPreview?1.05f:tvLayout?1.29f:1.12f));
         GridLayout grid=new GridLayout(this);
