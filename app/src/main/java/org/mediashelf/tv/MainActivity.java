@@ -3585,6 +3585,30 @@ public final class MainActivity extends Activity {
         });
     }
 
+    private void launch(String stream) {
+        Intent i=new Intent(Intent.ACTION_VIEW);
+        i.setDataAndType(Uri.parse(stream),"video/*");
+        try{startActivity(i);}catch(ActivityNotFoundException e){
+            themedDialog().setMessage(
+                "Установи видеоплеер, который принимает HTTP-видео (например VLC).")
+                .setPositiveButton("ОК",null).show();
+        }
+    }
+    private EditText field(LinearLayout parent,String caption,String value,boolean secret) {
+        TextView label=label(caption,14,MUTED,true);
+        parent.addView(label);
+        EditText field=new EditText(this);
+        field.setText(value);
+        field.setTextColor(WHITE);
+        field.setSingleLine(true);
+        field.setInputType(secret?
+            (InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD):
+            (InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI));
+        field.setBackground(MediaDesign.outlined(this,0xff1a263b,0xff483376,12,1));
+        field.setPadding(dp(14),0,dp(12),0);
+        parent.addView(field,spaced(-1,49,0,10));
+        return field;
+    }
     private void settings(boolean first) {
         LinearLayout root=column();
         root.setPadding(dp(20),dp(12),dp(20),dp(18));
