@@ -190,7 +190,7 @@ public final class MainActivity extends Activity {
         @Override public void run(){
             if(!carouselActive || featuredHost==null ||
                 featuredHost.getParent()==null || featuredItems.size()<2)return;
-            if(!featuredHost.hasFocus())advanceCarousel(1);
+            if(featuredHost.findFocus()==null)advanceCarousel(1);
             scheduleCarousel();
         }
     };
@@ -622,6 +622,22 @@ public final class MainActivity extends Activity {
             Button chip=button(name);
             chip.setTextSize(compactTvPreview?11:tvLayout?13:12);
             chip.setMinHeight(0);chip.setMinimumHeight(0);
+            chip.setId(View.generateViewId());
+            chip.setOnKeyListener((v,key,event)->{
+                if(event.getAction()!=android.view.KeyEvent.ACTION_DOWN)
+                    return false;
+                if(key==android.view.KeyEvent.KEYCODE_DPAD_UP){
+                    focusTopSearch();return true;
+                }
+                if(key==android.view.KeyEvent.KEYCODE_DPAD_DOWN){
+                    if(featuredHost!=null && featuredHost.getParent()!=null)
+                        featuredHost.requestFocus();
+                    else if(firstCatalogTile!=null)
+                        firstCatalogTile.requestFocus();
+                    return true;
+                }
+                return false;
+            });
             chip.setPadding(dp(compactTvPreview?10:15),0,
                 dp(compactTvPreview?10:15),0);
             chip.setOnClickListener(v->{
@@ -741,7 +757,9 @@ public final class MainActivity extends Activity {
                 filterButtons.get(i).getVisibility()==View.VISIBLE){
                 filterButtons.get(i).requestFocus();return;
             }
-            if(code==-1 && currentCategory==0){
+            if(currentCategory==0 &&
+                ((code==-1&&!lastSort.equals("popular"))||
+                 (code==-2&&lastSort.equals("popular")))){
                 filterButtons.get(i).requestFocus();return;
             }
         }
@@ -1374,6 +1392,7 @@ public final class MainActivity extends Activity {
         int coverHeight=(int)(cardWidth*
             (compactTvPreview?1.05f:tvLayout?1.29f:1.12f));
         GridLayout grid=new GridLayout(this);
+        final List<Integer> tileIds=new ArrayList<>();
         grid.setColumnCount(columns);
         grid.setClipChildren(false);
         grid.setClipToPadding(false);
@@ -1390,6 +1409,13 @@ public final class MainActivity extends Activity {
                 dp(compactTvPreview?3:tvLayout?4:6),
                 dp(compactTvPreview?4:tvLayout?5:10));
             tile.setClickable(true);tile.setFocusable(true);
+            tile.setId(View.generateViewId());
+            if(i>=columns)tile.setNextFocusUpId(tileIds.get(i-columns));
+            else if(featuredHost!=null)tile.setNextFocusUpId(featuredHost.getId());
+            else if(!filterButtons.isEmpty())
+                tile.setNextFocusUpId(filterButtons.get(0).getId());
+            tileIds.add(tile.getId());
+            if(i==0)firstCatalogTile=tile;
             tile.setContentDescription(item.title+"; "+item.size()+
                 "; сидов "+item.seeders+"; "+item.tracker);
             tile.setOnFocusChangeListener((v,f)->{
@@ -1447,10 +1473,18 @@ public final class MainActivity extends Activity {
             facts.setPadding(dp(compactTvPreview?3:7),dp(compactTvPreview?2:5),0,0);
             tile.addView(facts);
             tile.setOnClickListener(v->details(item));
+            final int tileRow=i/columns;
             tile.setOnKeyListener((v,key,event)->{
-                if(event.getAction()==android.view.KeyEvent.ACTION_DOWN &&
-                    (key==android.view.KeyEvent.KEYCODE_DPAD_CENTER ||
-                     key==android.view.KeyEvent.KEYCODE_ENTER)){
+                if(event.getAction()!=android.view.KeyEvent.ACTION_DOWN)
+                    return false;
+                if(key==android.view.KeyEvent.KEYCODE_DPAD_UP && tileRow==0){
+                    if(featuredHost!=null && featuredHost.getParent()!=null)
+                        featuredHost.requestFocus();
+                    else focusCurrentCategory();
+                    return true;
+                }
+                if(key==android.view.KeyEvent.KEYCODE_DPAD_CENTER ||
+                   key==android.view.KeyEvent.KEYCODE_ENTER){
                     details(item);return true;
                 }
                 return false;
@@ -1520,6 +1554,25 @@ public final class MainActivity extends Activity {
         hero.setClipToOutline(true);
         hero.setFocusable(true);
         hero.setClickable(true);
+        hero.setId(View.generateViewId());
+        hero.setOnKeyListener((v,key,event)->{
+            if(event.getAction()!=android.view.KeyEvent.ACTION_DOWN)
+                return false;
+            if(key==android.view.KeyEvent.KEYCODE_DPAD_UP){
+                focusCurrentCategory();return true;
+            }
+            if(key==android.view.KeyEvent.KEYCODE_DPAD_DOWN){
+                if(firstCatalogTile!=null)firstCatalogTile.requestFocus();
+                return true;
+            }
+            if(key==android.view.KeyEvent.KEYCODE_DPAD_LEFT){
+                advanceCarousel(-1);return true;
+            }
+            if(key==android.view.KeyEvent.KEYCODE_DPAD_RIGHT){
+                advanceCarousel(1);return true;
+            }
+            return false;
+        });
         hero.setContentDescription("Рекомендованные фильмы, карусель");
         hero.setOnFocusChangeListener((v,f)->{
             hero.setBackground(f?
@@ -1584,6 +1637,15 @@ public final class MainActivity extends Activity {
         back.setContentDescription("Предыдущий фильм");
         back.setPadding(0,0,0,0);
         back.setOnClickListener(v->advanceCarousel(-1));
+        back.setOnKeyListener((v,key,event)->{
+            if(event.getAction()!=android.view.KeyEvent.ACTION_DOWN)return false;
+            if(key==android.view.KeyEvent.KEYCODE_DPAD_UP){
+                focusCurrentCategory();return true;
+            }
+            if(key==android.view.KeyEvent.KEYCODE_DPAD_DOWN &&
+                firstCatalogTile!=null){firstCatalogTile.requestFocus();return true;}
+            return false;
+        });
         navigation.addView(back,lp(
             compactTvPreview?24:tvLayout?29:39,compactTvPreview?23:tvLayout?27:36));
         featuredDots=label("",compactTvPreview?12:13,MediaDesign.ACCENT_LIGHT,true);
@@ -1597,6 +1659,15 @@ public final class MainActivity extends Activity {
         forward.setContentDescription("Следующий фильм");
         forward.setPadding(0,0,0,0);
         forward.setOnClickListener(v->advanceCarousel(1));
+        forward.setOnKeyListener((v,key,event)->{
+            if(event.getAction()!=android.view.KeyEvent.ACTION_DOWN)return false;
+            if(key==android.view.KeyEvent.KEYCODE_DPAD_UP){
+                focusCurrentCategory();return true;
+            }
+            if(key==android.view.KeyEvent.KEYCODE_DPAD_DOWN &&
+                firstCatalogTile!=null){firstCatalogTile.requestFocus();return true;}
+            return false;
+        });
         navigation.addView(forward,lp(
             compactTvPreview?24:tvLayout?29:39,compactTvPreview?23:tvLayout?27:36));
         featuredControls=navigation;
