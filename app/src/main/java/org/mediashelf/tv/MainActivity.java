@@ -14,10 +14,6 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Canvas;
-import android.graphics.Paint;
-import android.text.SpannableString;
-import android.text.Spanned;
-import android.text.style.ReplacementSpan;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
@@ -77,7 +73,7 @@ public final class MainActivity extends Activity {
     private LinearLayout sidebarPanel;
     private LinearLayout sidebarNavigation;
     private Button navHomeButton,navPopularButton,navSourceButton,navFavoritesButton;
-    private Drawable popularFlameIcon;
+    private ImageView popularFlameView;
     private Button navSectionsButton,navActiveCategoryButton;
     private boolean sidebarSectionsExpanded=false;
     private String sidebarFetchedSource="";
@@ -690,29 +686,6 @@ public final class MainActivity extends Activity {
         currentSectionLabel.setText(src+"   /   "+section);
     }
 
-    /**
-     * Inline icon occupies one text character. This lets the Button's normal
-     * CENTER gravity position the flame on precisely the same horizontal axis
-     * as the home and favorite symbols. A compound left drawable cannot do so.
-     * Draw at the vertical centre of the text line at every screen density.
-     */
-    private static final class CenteredDrawableSpan extends ReplacementSpan {
-        private final Drawable icon;
-        CenteredDrawableSpan(Drawable drawable){icon=drawable;}
-        @Override public int getSize(Paint paint,CharSequence text,int start,
-                int end,Paint.FontMetricsInt metrics){
-            return icon.getBounds().width();
-        }
-        @Override public void draw(Canvas canvas,CharSequence text,int start,int end,
-                float x,int top,int y,int bottom,Paint paint){
-            int height=icon.getBounds().height();
-            int centre=(top+bottom)/2;
-            canvas.save();
-            canvas.translate(x,centre-height/2f);
-            icon.draw(canvas);
-            canvas.restore();
-        }
-    }
     /** A vector is drawn at the precise button centre, independently of glyph metrics. */
     private static class CenterIconButton extends Button {
         private Drawable symbol;
@@ -752,31 +725,14 @@ public final class MainActivity extends Activity {
         });
         return b;
     }
-    private final class FlameNavigationButton extends Button {
-        private final Drawable icon;
-        FlameNavigationButton(){
-            super(MainActivity.this);
-            icon=getDrawable(R.drawable.ic_flame).mutate();
-            popularFlameIcon=icon;
-            setText(sidebarCollapsed?"":"     Популярное");
-            setAllCaps(false);
-            setMinHeight(0);setMinimumHeight(0);
-            setFocusable(true);
-        }
-        @Override protected void onDraw(Canvas canvas){
-            super.onDraw(canvas);
-            int size=dp(17);
-            int left=sidebarCollapsed?(getWidth()-size)/2:getPaddingLeft()+dp(1);
-            int top=(getHeight()-size)/2;
-            icon.setBounds(left,top,left+size,top+size);
-            icon.draw(canvas);
-        }
-    }
     private Button addSidebarEntry(String symbol,String label,
         Runnable action,boolean active){
-        Button b=label.equals("Популярное")?
-            new FlameNavigationButton():
-            button(sidebarCollapsed?symbol:symbol+"   "+label);
+        // The flame has its OWN ImageView overlay. It is never drawn by Button text,
+        // compound drawable, span or Button.onDraw, where it disappeared on TVs.
+        final boolean flameEntry="Популярное".equals(label);
+        Button b=button(flameEntry?
+            (sidebarCollapsed?"":"       Популярное"):
+            (sidebarCollapsed?symbol:symbol+"   "+label));
         b.setTextSize(sidebarCollapsed?
             (compactTvPreview?17:20):(compactTvPreview?11:14));
         b.setGravity(sidebarCollapsed?Gravity.CENTER:
@@ -822,8 +778,29 @@ public final class MainActivity extends Activity {
             return false;
         });
         b.setOnClickListener(v->action.run());
-        sidebarNavigation.addView(b,spaced(-1,
-            compactTvPreview?34:42,0,compactTvPreview?3:5));
+        if(flameEntry){
+            android.widget.FrameLayout host=new android.widget.FrameLayout(this);
+            host.setClipChildren(false);
+            host.setClipToPadding(false);
+            host.addView(b,new android.widget.FrameLayout.LayoutParams(-1,-1));
+            ImageView flame=new ImageView(this);
+            flame.setImageResource(R.drawable.ic_popular_fire_25);
+            flame.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            flame.setColorFilter(active?MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
+            flame.setFocusable(false);
+            flame.setClickable(false);
+            android.widget.FrameLayout.LayoutParams iconParams=
+                new android.widget.FrameLayout.LayoutParams(dp(23),dp(23),
+                    sidebarCollapsed?Gravity.CENTER:Gravity.LEFT|Gravity.CENTER_VERTICAL);
+            if(!sidebarCollapsed)iconParams.leftMargin=dp(compactTvPreview?8:12);
+            host.addView(flame,iconParams);
+            popularFlameView=flame;
+            sidebarNavigation.addView(host,spaced(-1,
+                compactTvPreview?34:42,0,compactTvPreview?3:5));
+        }else{
+            sidebarNavigation.addView(b,spaced(-1,
+                compactTvPreview?34:42,0,compactTvPreview?3:5));
+        }
         return b;
     }
 
@@ -859,7 +836,7 @@ public final class MainActivity extends Activity {
             load("","popular");
         },!favoritesMode&&lastQuery.isEmpty()&&currentCategory==0&&
             lastSort.equals("popular"));
-        if(popularFlameIcon!=null)popularFlameIcon.setTint(
+        if(popularFlameView!=null)popularFlameView.setColorFilter(
             lastQuery.isEmpty()&&currentCategory==0&&
             lastSort.equals("popular")&&!favoritesMode?
                 MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
@@ -1141,7 +1118,14 @@ public final class MainActivity extends Activity {
             }).create();
         search.setOnEditorActionListener((v,action,event)->{
             if(action==EditorInfo.IME_ACTION_SEARCH){
-                dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+                // TV keyboard's Search key must NOT press the dialog's
+                // positive button: that would dismiss the saved-search star.
+                android.view.inputmethod.InputMethodManager input=
+                    (android.view.inputmethod.InputMethodManager)
+                        getSystemService(android.content.Context.INPUT_METHOD_SERVICE);
+                if(input!=null)
+                    input.hideSoftInputFromWindow(search.getWindowToken(),0);
+                saveQuery.requestFocus();
                 return true;
             }
             return false;
@@ -1889,11 +1873,9 @@ public final class MainActivity extends Activity {
                 MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
             navPopularButton.setTextColor(popular?
                 MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
-            if(popularFlameIcon!=null){
-                popularFlameIcon.setTint(popular?
+            if(popularFlameView!=null)
+                popularFlameView.setColorFilter(popular?
                     MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
-                navPopularButton.invalidate();
-            }
         }
         final String source=activeSource;
         final String providerQuery=SearchTerms.upstreamQuery(q);
