@@ -61,6 +61,7 @@ public final class MainActivity extends Activity {
     private Button sourceSelector;
     private Button topSearchButton;
     private Button bannerSettingsButton;
+    private View firstCatalogTile;
     private boolean tvLayout;
     private boolean tvPreviewMode;
     private boolean compactTvPreview;
@@ -443,30 +444,26 @@ public final class MainActivity extends Activity {
         outer.requestFocus();
         if(tvLayout){
             LinearLayout sidebar=column();
-            sidebar.setPadding(dp(compactTvPreview?8:16),
-                dp(compactTvPreview?9:23),dp(compactTvPreview?8:16),
-                dp(compactTvPreview?8:18));
+            sidebar.setPadding(dp(compactTvPreview?7:9),
+                dp(compactTvPreview?8:13),dp(compactTvPreview?7:9),
+                dp(compactTvPreview?7:10));
             sidebar.setBackground(MediaDesign.horizontal(this,
                 new int[]{0xff12182b,0xff0d1425},0));
             LinearLayout brandRow=line();
-            TextView brandLogo=label("▶",compactTvPreview?19:27,Color.WHITE,true);
+            TextView brandLogo=label("▶",compactTvPreview?17:20,Color.WHITE,true);
             brandLogo.setGravity(Gravity.CENTER);
             brandLogo.setBackground(MediaDesign.gradient(this,
                 new int[]{0xffae4df1,0xff5723d2},15));
             brandRow.addView(brandLogo,spaced(
-                compactTvPreview?34:48,compactTvPreview?34:48,
-                compactTvPreview?7:12,0));
+                compactTvPreview?30:36,compactTvPreview?30:36,
+                compactTvPreview?6:8,0));
             LinearLayout brandText=column();
             brandText.addView(label("MediaShelf",
-                compactTvPreview?16:23,MediaDesign.TEXT,true));
-            if(!compactTvPreview){
-                TextView sub=label("ТВОЯ МЕДИАТЕКА",10,MediaDesign.MUTED,true);
-                sub.setLetterSpacing(0.13f);
-                brandText.addView(sub);
-            }
+                compactTvPreview?14:18,MediaDesign.TEXT,true));
+            // Keep the brand in a single compact line, without a subtitle.
             brandRow.addView(brandText);
             sidebar.addView(brandRow,spaced(-1,
-                compactTvPreview?42:58,0,compactTvPreview?7:34));
+                compactTvPreview?35:42,0,compactTvPreview?8:15));
             TextView section=eyebrow("НАВИГАЦИЯ");
             section.setPadding(dp(compactTvPreview?5:11),0,0,
                 dp(compactTvPreview?4:11));
@@ -477,7 +474,7 @@ public final class MainActivity extends Activity {
             home.setOnClickListener(v->selectSource("all"));
             home.setTextSize(compactTvPreview?11:14);
             sidebar.addView(home,spaced(-1,
-                compactTvPreview?38:52,0,compactTvPreview?5:18));
+                compactTvPreview?34:39,0,compactTvPreview?5:10));
             sourceSummary=eyebrow("ИСТОЧНИКИ");
             sourceSummary.setPadding(dp(compactTvPreview?5:11),0,0,
                 dp(compactTvPreview?4:11));
@@ -501,28 +498,35 @@ public final class MainActivity extends Activity {
             Button check=button("◈  Проверка сайтов");
             check.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
             check.setPadding(dp(compactTvPreview?6:14),0,0,0);
-            check.setTextSize(compactTvPreview?11:14);
+            check.setTextSize(compactTvPreview?11:12);
             check.setOnClickListener(v->diagnostics());
             sidebar.addView(check,spaced(-1,
-                compactTvPreview?39:47,0,compactTvPreview?3:7));
+                compactTvPreview?35:39,0,compactTvPreview?3:5));
+            Button banner=button("✦  Настройка баннера");
+            banner.setTextSize(compactTvPreview?11:12);
+            banner.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
+            banner.setPadding(dp(compactTvPreview?6:11),0,0,0);
+            banner.setOnClickListener(v->configureBanner());
+            sidebar.addView(banner,spaced(-1,
+                compactTvPreview?35:39,0,compactTvPreview?3:5));
             Button settings=button("⚙  Настройки");
             settings.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
             settings.setPadding(dp(compactTvPreview?6:14),0,0,0);
-            settings.setTextSize(compactTvPreview?11:14);
+            settings.setTextSize(compactTvPreview?11:12);
             settings.setOnClickListener(v->settings(false));
-            sidebar.addView(settings,lp(-1,compactTvPreview?39:47));
+            sidebar.addView(settings,lp(-1,compactTvPreview?35:39));
             if(!compactTvPreview){
                 TextView foot=label("OK — открыть     ◀ — назад",10,0xff7585a4,false);
                 foot.setPadding(dp(10),dp(19),0,0);
                 sidebar.addView(foot);
             }
             outer.addView(sidebar,lp(compactTvPreview?
-                Math.max(122,Math.min(150,screenWidthDp/5)):240,-1));
+                Math.max(120,Math.min(146,screenWidthDp/5)):176,-1));
         }
         LinearLayout app=column();
-        app.setPadding(dp(compactTvPreview?12:tvLayout?30:16),
-            dp(compactTvPreview?8:tvLayout?23:14),
-            dp(compactTvPreview?11:tvLayout?27:16),0);
+        app.setPadding(dp(compactTvPreview?9:tvLayout?18:16),
+            dp(compactTvPreview?7:tvLayout?11:14),
+            dp(compactTvPreview?9:tvLayout?15:16),0);
         outer.addView(app,new LinearLayout.LayoutParams(0,-1,1));
 
         LinearLayout header=line();
@@ -770,7 +774,7 @@ public final class MainActivity extends Activity {
         for(SiteCatalog.Site site:SiteCatalog.all()){
             boolean selected=activeSource.equals(site.id);
             Button b=button((site.direct?"●  ":"○  ")+site.title);
-            b.setTextSize(compactTvPreview?11:14);
+            b.setTextSize(compactTvPreview?11:12);
             b.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
             b.setPadding(dp(compactTvPreview?7:15),0,0,0);
             b.setTextColor(selected?MediaDesign.TEXT:
@@ -789,23 +793,23 @@ public final class MainActivity extends Activity {
             b.setContentDescription(site.title+", "+site.mode());
             b.setOnClickListener(v->selectSource(site.id));
             sourceButtons.addView(b,spaced(-1,
-                compactTvPreview?37:49,0,compactTvPreview?2:5));
+                compactTvPreview?34:39,0,compactTvPreview?2:4));
         }
         Button all=button("▦  Все подключённые");
         all.setTextSize(13);
         all.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
         all.setPadding(dp(15),0,0,0);
         all.setOnClickListener(v->selectSource("all"));
-        all.setTextSize(compactTvPreview?11:13);
+        all.setTextSize(compactTvPreview?11:12);
         sourceButtons.addView(all,spaced(-1,
-            compactTvPreview?36:48,0,compactTvPreview?2:5));
+            compactTvPreview?34:39,0,compactTvPreview?2:4));
         Button add=button("+  Управление сайтами");
         add.setTextSize(13);
         add.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
         add.setPadding(dp(15),0,0,0);
         add.setOnClickListener(v->chooseSource());
-        add.setTextSize(compactTvPreview?11:13);
-        sourceButtons.addView(add,lp(-1,compactTvPreview?36:48));
+        add.setTextSize(compactTvPreview?11:12);
+        sourceButtons.addView(add,lp(-1,compactTvPreview?34:39));
         updateFilters();
     }
     private void loadSources() {
