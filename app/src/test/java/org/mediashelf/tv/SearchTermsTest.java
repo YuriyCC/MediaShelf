@@ -24,8 +24,8 @@ public final class SearchTermsTest {
         assertTrue(SearchTerms.matchesTitle("Dorcel Gangbang","dorcel dorcel gangbang"));
         assertFalse(SearchTerms.needsAndFilter("dorcel dorcel"));
     }
-    @Test public void upstreamSearchUsesOnlySeedWordForMultiTermQueries(){
-        assertEquals("dorcel",SearchTerms.upstreamQuery("Dorcel Gangbang"));
+    @Test public void upstreamSearchKeepsAllWords(){
+        assertEquals("Dorcel Gangbang",SearchTerms.upstreamQuery("Dorcel Gangbang"));
         assertEquals("Gangbang",SearchTerms.upstreamQuery("  Gangbang  "));
         assertEquals("",SearchTerms.upstreamQuery(null));
     }
