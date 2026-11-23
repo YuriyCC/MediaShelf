@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.DialogInterface;
 import android.widget.PopupWindow;
+import android.widget.ProgressBar;
 import android.graphics.drawable.Drawable;
 import android.content.pm.ActivityInfo;
 import android.content.ActivityNotFoundException;
@@ -46,6 +47,7 @@ import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -58,6 +60,8 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.Future;
 
 public final class MainActivity extends Activity {
     private static final int BACK = MediaDesign.BG, PANEL = MediaDesign.SURFACE,
@@ -116,6 +120,10 @@ public final class MainActivity extends Activity {
     private PopupWindow cardActionPopup;
     private View cardReturnFocus;
     private int cardReturnScroll;
+    private static final int SAVE_VIDEO_REQUEST=9301;
+    private DownloadSelection pendingDownload;
+    private AtomicBoolean activeDownload;
+    private volatile HttpURLConnection activeDownloadConnection;
     private final Handler main = new Handler(Looper.getMainLooper());
     private SharedPreferences prefs;
     private FavoritesStore favorites;
@@ -2957,23 +2965,317 @@ public final class MainActivity extends Activity {
         loadImage(full,photoUrl,referer(item),null,false,true);
         back.requestFocus();
     }
+    private static final class DownloadSelection {
+        final String stream,name;
+        final long size;
+        DownloadSelection(String stream,String name,long size){
+            this.stream=stream;this.name=name;this.size=size;
+        }
+    }
+    private static final class PlaybackProgress {
+        final AlertDialog dialog;
+        final TextView stage,speed,peers;
+        final ProgressBar progress;
+        final AtomicBoolean active=new AtomicBoolean(true);
+        PlaybackProgress(AlertDialog d,TextView stage,TextView speed,
+                         TextView peers,ProgressBar progress){
+            this.dialog=d;this.stage=stage;this.speed=speed;
+            this.peers=peers;this.progress=progress;
+        }
+        void update(String title,String rate,String detail,int pct){
+            stage.setText(title);
+            speed.setText(rate);
+            peers.setText(detail);
+            progress.setIndeterminate(pct<0);
+            if(pct>=0)progress.setProgress(Math.min(100,Math.max(0,pct)));
+        }
+        void close(){
+            active.set(false);
+            dialog.dismiss();
+        }
+    }
+    private static String dataRate(double bytes){
+        if(bytes<0)return "—";
+        return String.format(Locale.US,"%.2f МБ/с (%.1f Мбит/с)",
+            bytes/1048576.0,bytes*8.0/1000000.0);
+    }
+    private static String dataSize(long bytes){
+        if(bytes<=0)return "—";
+        return bytes>=1073741824L?
+            String.format(Locale.US,"%.2f ГБ",bytes/1073741824.0):
+            String.format(Locale.US,"%.0f МБ",bytes/1048576.0);
+    }
+    private PlaybackProgress progressWindow(String title){
+        LinearLayout body=column();
+        body.setPadding(dp(22),dp(9),dp(22),dp(16));
+        TextView stage=label(title,16,MediaDesign.TEXT,true);
+        body.addView(stage,spaced(-1,-2,0,10));
+        ProgressBar progress=new ProgressBar(this,null,
+            android.R.attr.progressBarStyleHorizontal);
+        progress.setIndeterminate(true);
+        progress.setMax(100);
+        progress.setProgressTintList(
+            android.content.res.ColorStateList.valueOf(MediaDesign.ACCENT));
+        body.addView(progress,spaced(-1,11,0,12));
+        TextView speed=label("Скорость: ожидаем соединение…",
+            14,MediaDesign.ACCENT_LIGHT,false);
+        body.addView(speed,spaced(-1,-2,0,8));
+        TextView peers=label("TorrServer: получение данных",
+            12,MediaDesign.MUTED,false);
+        peers.setMaxLines(3);
+        body.addView(peers,spaced(-1,-2,0,8));
+        AlertDialog dialog=themedDialog().setTitle("MediaShelf · загрузка")
+            .setView(body).setNegativeButton("Отмена",null).create();
+        PlaybackProgress state=new PlaybackProgress(dialog,stage,speed,peers,progress);
+        dialog.setOnShowListener(d->{
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v->state.close());
+        });
+        dialog.show();
+        return state;
+    }
     private void play(Item item) {
+        showSelectionDialog("Режим запуска",new String[]{
+            "▶  Смотреть сразу",
+            "▣  С предзагрузкой (рекомендуется)",
+            "↓  Скачать полностью на устройство"
+        },(d,choice)->prepareVideo(item,choice),"Отмена");
+    }
+    private void prepareVideo(Item item,int mode){
         String server=prefs.getString("torr_url","http://127.0.0.1:8090");
-        Toast.makeText(this,"Получаем файлы через TorrServer...",Toast.LENGTH_LONG).show();
+        PlaybackProgress state=progressWindow("Получаем список файлов через TorrServer…");
         worker.execute(()->{
-            try {
+            try{
                 Torr.Opened opened=Torr.open(server,item);
+                if(!state.active.get())return;
                 main.post(()->{
-                    if(isFinishing())return;
-                    if(opened.files.size()==1){launch(Torr.url(server,opened.hash,opened.files.get(0)));return;}
-                    String[] names=new String[opened.files.size()];
-                    for(int i=0;i<names.length;i++)names[i]=opened.files.get(i).path;
-                    showSelectionDialog("Выбери видеофайл",names,
-                        (d,n)->launch(Torr.url(server,opened.hash,opened.files.get(n))),"Отмена");
+                    if(!state.active.get()||isFinishing())return;
+                    state.close();
+                    if(opened.files.size()==1)
+                        choosePlaybackFile(server,opened,opened.files.get(0),mode);
+                    else{
+                        String[] names=new String[opened.files.size()];
+                        for(int i=0;i<names.length;i++)
+                            names[i]=opened.files.get(i).path+"  ·  "+
+                                dataSize(opened.files.get(i).size);
+                        showSelectionDialog("Выбери видеофайл",names,
+                            (d,n)->choosePlaybackFile(server,opened,
+                                opened.files.get(n),mode),"Назад");
+                    }
                 });
             }catch(Exception e){
-                main.post(()->{if(!isFinishing())themedDialog().setTitle("Ошибка TorrServer").setMessage(error(e)).setPositiveButton("ОК",null).show();});
+                main.post(()->{
+                    if(!state.active.get()||isFinishing())return;
+                    state.close();
+                    themedDialog().setTitle("Ошибка TorrServer")
+                        .setMessage(error(e)).setPositiveButton("ОК",null).show();
+                });
             }
+        });
+    }
+    private void choosePlaybackFile(String server,Torr.Opened opened,
+                                    Torr.Video video,int mode){
+        String stream=Torr.url(server,opened.hash,video);
+        if(mode==0){launch(stream);return;}
+        if(mode==2){
+            String name=video.path.substring(video.path.lastIndexOf('/')+1);
+            if(name.trim().isEmpty())name="MediaShelf-video.mp4";
+            pendingDownload=new DownloadSelection(stream,name,video.size);
+            Intent picker=new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            picker.addCategory(Intent.CATEGORY_OPENABLE);
+            picker.setType("video/*");
+            picker.putExtra(Intent.EXTRA_TITLE,name);
+            picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|
+                Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            try{startActivityForResult(picker,SAVE_VIDEO_REQUEST);}
+            catch(ActivityNotFoundException e){
+                pendingDownload=null;
+                themedDialog().setTitle("Скачивание недоступно")
+                    .setMessage("На телевизоре нет системного выбора папки. "+
+                        "Подключи USB-накопитель или файловый менеджер "+
+                        "с поддержкой Android Storage Access Framework.")
+                    .setPositiveButton("ОК",null).show();
+            }
+            return;
+        }
+        PlaybackProgress state=progressWindow("Предзагрузка в буфер TorrServer…");
+        // TorrServer's preload target is configured in the server, not in
+        // individual streaming URLs. Display the real reported target.
+        state.peers.setText("Объём буфера задаётся в TorrServer. "+
+            "Скорость и процент обновляются автоматически.");
+        state.dialog.setButton(AlertDialog.BUTTON_NEUTRAL,"Смотреть сейчас",
+            (d,w)->{
+                if(state.active.getAndSet(false))launch(stream);
+            });
+        AtomicBoolean finished=new AtomicBoolean(false);
+        final String[] failed={""};
+        worker.execute(()->{
+            try{Torr.triggerPreload(stream);}
+            catch(Exception e){failed[0]=error(e);}
+            finally{finished.set(true);}
+        });
+        worker.execute(()->{
+            final long start=android.os.SystemClock.elapsedRealtime();
+            while(state.active.get() && !isFinishing() &&
+                android.os.SystemClock.elapsedRealtime()-start<180000){
+                try{
+                    JSONObject status=Torr.status(server,opened.hash);
+                    long size=status.optLong("preload_size",0);
+                    long done=status.optLong("preloaded_bytes",0);
+                    double rate=status.optDouble("download_speed",0);
+                    int peers=status.optInt("active_peers",0);
+                    int pct=size>0?(int)Math.min(100,done*100L/size):-1;
+                    main.post(()->{
+                        if(!state.active.get())return;
+                        state.update("Предзагрузка: "+dataSize(done)+" / "+
+                            (size>0?dataSize(size):"буфер TorrServer"),
+                            "Скорость: "+dataRate(rate),
+                            "Подключено пиров: "+peers+
+                                (pct>=0?" · "+pct+"%":" · подготовка"),pct);
+                    });
+                    if(finished.get()){
+                        if(!failed[0].isEmpty())throw new IOException(failed[0]);
+                        main.post(()->{
+                            if(state.active.get() && !isFinishing()){
+                                state.close();
+                                launch(stream);
+                            }
+                        });
+                        return;
+                    }
+                    Thread.sleep(1100);
+                }catch(InterruptedException interrupted){
+                    Thread.currentThread().interrupt();
+                    return;
+                }catch(Exception failure){
+                    final String problem=error(failure);
+                    main.post(()->{
+                        if(!state.active.get()||isFinishing())return;
+                        state.close();
+                        themedDialog().setTitle("Предзагрузка не удалась")
+                            .setMessage(problem+"\nМожно начать воспроизведение сразу.")
+                            .setPositiveButton("Смотреть сейчас",(d,w)->launch(stream))
+                            .setNegativeButton("Закрыть",null).show();
+                    });
+                    return;
+                }
+            }
+            if(state.active.get()){
+                main.post(()->{
+                    if(!state.active.get()||isFinishing())return;
+                    state.close();
+                    themedDialog().setTitle("Предзагрузка занимает слишком долго")
+                        .setMessage("Скорость сети низкая. Смотреть без "+
+                            "предзагрузки или повторить попытку?")
+                        .setPositiveButton("Смотреть сейчас",(d,w)->launch(stream))
+                        .setNegativeButton("Отмена",null).show();
+                });
+            }
+        });
+    }
+
+    @Override protected void onActivityResult(int code,int result,Intent data){
+        super.onActivityResult(code,result,data);
+        if(code!=SAVE_VIDEO_REQUEST)return;
+        DownloadSelection job=pendingDownload;
+        pendingDownload=null;
+        if(result!=Activity.RESULT_OK || data==null || data.getData()==null ||
+            job==null)return;
+        android.net.Uri destination=data.getData();
+        startVideoDownload(job,destination);
+    }
+    private void startVideoDownload(DownloadSelection video,android.net.Uri destination){
+        PlaybackProgress state=progressWindow("Скачиваем фильм на выбранный накопитель…");
+        activeDownload=state.active;
+        getWindow().addFlags(
+            android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        worker.execute(()->{
+            HttpURLConnection c=null;
+            long transferred=0;
+            boolean completed=false;
+            try(OutputStream output=getContentResolver().openOutputStream(destination,"w")){
+                if(output==null)throw new IOException("Нет доступа к выбранному файлу");
+                c=(HttpURLConnection)new URL(video.stream).openConnection();
+                activeDownloadConnection=c;
+                c.setConnectTimeout(12000);
+                c.setReadTimeout(45000);
+                c.setRequestProperty("User-Agent",SiteDetails.USER_AGENT);
+                int status=c.getResponseCode();
+                if(status!=200 && status!=206)
+                    throw new IOException("TorrServer HTTP "+status);
+                final long length=video.size>0?video.size:c.getContentLengthLong();
+                try(InputStream in=c.getInputStream()){
+                    byte[] buffer=new byte[65536];
+                    int n;
+                    long tick=android.os.SystemClock.elapsedRealtime(),bytesInTick=0;
+                    while(state.active.get() && (n=in.read(buffer))!=-1){
+                        output.write(buffer,0,n);
+                        transferred+=n;
+                        bytesInTick+=n;
+                        long now=android.os.SystemClock.elapsedRealtime();
+                        if(now-tick>=900){
+                            final long loaded=transferred;
+                            final double rate=bytesInTick*1000.0/
+                                Math.max(1,now-tick);
+                            final int pct=length>0?(int)Math.min(100,
+                                loaded*100L/length):-1;
+                            main.post(()->{
+                                if(state.active.get())
+                                    state.update("Скачано "+dataSize(loaded)+
+                                        (length>0?" / "+dataSize(length):""),
+                                        "Скорость: "+dataRate(rate),
+                                        "Сохраняется на выбранный накопитель "+
+                                            (pct>=0?"· "+pct+"%":""),pct);
+                            });
+                            tick=now;bytesInTick=0;
+                        }
+                    }
+                }
+                output.flush();
+                completed=state.active.get() &&
+                    (length<=0 || transferred>=length);
+                if(!completed && state.active.get())
+                    throw new IOException("Получены не все данные фильма");
+            }catch(Exception error){
+                final String details=error(error);
+                main.post(()->{
+                    if(!isFinishing() && state.active.get())
+                        themedDialog().setTitle("Скачивание прервано")
+                            .setMessage(details).setPositiveButton("ОК",null).show();
+                });
+            }finally{
+                if(c!=null)c.disconnect();
+                activeDownloadConnection=null;
+                getWindow().getDecorView().post(()->{
+                    if(!isFinishing())getWindow().clearFlags(
+                        android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                });
+            }
+            final boolean success=completed;
+            main.post(()->{
+                boolean wasOpen=state.active.get();
+                state.close();
+                if(!success){
+                    // Avoid leaving a file that looks playable but is truncated.
+                    try{
+                        if(android.provider.DocumentsContract.isDocumentUri(this,destination))
+                            android.provider.DocumentsContract.deleteDocument(
+                                getContentResolver(),destination);
+                    }catch(Exception ignored){}
+                    return;
+                }
+                if(!isFinishing() && wasOpen)
+                    themedDialog().setTitle("Скачивание завершено")
+                        .setMessage("Фильм сохранён. Его можно смотреть без торрента.")
+                        .setPositiveButton("Смотреть",(d,w)->{
+                            Intent open=new Intent(Intent.ACTION_VIEW);
+                            open.setDataAndType(destination,"video/*");
+                            open.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                            try{startActivity(open);}catch(Exception e){
+                                Toast.makeText(this,"Не найден локальный видеоплеер",
+                                    Toast.LENGTH_LONG).show();
+                            }
+                        }).setNegativeButton("Закрыть",null).show();
+            });
         });
     }
     private void launch(String stream) {
