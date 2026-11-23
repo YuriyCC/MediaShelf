@@ -96,6 +96,7 @@ public final class MainActivity extends Activity {
     private String sourceListError = "";
     private final List<Item> catalogItems = new ArrayList<>();
     private SitePages.Cursor sitePageCursor;
+    private MultiWordSession multiWordSession;
     private int visibleCount=60;
     private boolean loadingNextPage=false;
     private String pageInfo="";
@@ -1659,6 +1660,7 @@ public final class MainActivity extends Activity {
         favoritesMode=true;
         ++serial; // invalidate any running tracker request
         sitePageCursor=null;
+        multiWordSession=null;
         loadingNextPage=false;
         visibleCount=60;
         lastQuery="";
@@ -1701,6 +1703,104 @@ public final class MainActivity extends Activity {
         }catch(org.json.JSONException ignored){}
         return record;
     }
+    /**
+     * Scan independent queries for each word. A tracker can match "Blacked"
+     * and "Gangbang" on different pages; filtering a single first page loses
+     * valid results. Keep cursors to resume scanning without a page cap.
+     */
+    private static final class MultiWordSession {
+        final String query;
+        final List<SitePages.Cursor> cursors=new ArrayList<>();
+        final List<Item> results=new ArrayList<>();
+        final Set<String> found=new HashSet<>();
+        final int category;
+        final int id;
+        int scanned=0;
+        int nextIndex=0;
+        boolean running=false;
+        String lastError="";
+        MultiWordSession(String q,NativeSource source,int category,int id){
+            query=q;this.category=category;this.id=id;
+            for(String term:SearchTerms.words(q))
+                cursors.add(source.begin(term,category));
+        }
+        boolean hasMore(){
+            for(SitePages.Cursor c:cursors)if(!c.finished)return true;
+            return false;
+        }
+    }
+    private void scanWords(MultiWordSession session,boolean initial){
+        if(session.running)return;
+        session.running=true;
+        loadingNextPage=true;
+        worker.execute(()->{
+            long deadline=android.os.SystemClock.elapsedRealtime()+
+                (initial?36000:28000);
+            int pageBudget=initial?20:14;
+            NativeSource source=NativeSources.get(
+                activeSource.equals("all")?"xxxclub":activeSource);
+            if(source==null)return;
+            int attempts=0;
+            while(session.id==serial && session.hasMore() &&
+                  attempts<pageBudget &&
+                  android.os.SystemClock.elapsedRealtime()<deadline){
+                SitePages.Cursor cursor=null;
+                for(int seek=0;seek<session.cursors.size();seek++){
+                    int pos=(session.nextIndex+seek)%session.cursors.size();
+                    if(!session.cursors.get(pos).finished){
+                        cursor=session.cursors.get(pos);
+                        session.nextIndex=(pos+1)%session.cursors.size();
+                        break;
+                    }
+                }
+                if(cursor==null)break;
+                try{
+                    SitePages.Page page=source.fetchNext(cursor,session.category);
+                    session.scanned++;
+                    for(Item item:page.items){
+                        if(SearchTerms.matchesTitle(item.title,session.query) &&
+                            session.found.add(catalogKey(item)))
+                            session.results.add(item);
+                    }
+                }catch(Exception ex){
+                    session.lastError=error(ex);
+                    // A single provider failure must not leave an endless loop.
+                    cursor.finished=true;
+                }
+                attempts++;
+                // Streaming status once per page ensures the user never has to
+                // guess whether the search is still checking later pages.
+                final List<Item> snapshot=new ArrayList<>(session.results);
+                final int pages=session.scanned;
+                main.post(()->{
+                    if(isFinishing()||session.id!=serial||
+                       multiWordSession!=session)return;
+                    catalogItems.clear();
+                    catalogItems.addAll(snapshot);
+                    pageInfo="Поиск по всем словам · проверено страниц: "+pages+
+                        " · найдено: "+snapshot.size()+
+                        (session.hasMore()?" · поиск продолжается":" · поиск завершён");
+                    if(status!=null)status.setText("Поиск: "+session.query+
+                        " · страниц "+pages+" · найдено "+snapshot.size());
+                    show(catalogItems);
+                });
+                if(session.results.size()>=35)break;
+            }
+            main.post(()->{
+                if(isFinishing()||session.id!=serial||
+                    multiWordSession!=session)return;
+                session.running=false;
+                loadingNextPage=false;
+                pageInfo="Проверено страниц: "+session.scanned+
+                    " · найдено раздач с каждым словом: "+session.results.size()+
+                    (session.hasMore()?
+                        " · можно продолжить поиск по следующим страницам":
+                        " · доступные страницы проверены")+
+                    (session.lastError.isEmpty()?"":" · "+session.lastError);
+                show(catalogItems);
+            });
+        });
+    }
     private static List<Item> filterByAndTerms(List<Item> incoming,String query){
         if(!SearchTerms.needsAndFilter(query))return incoming;
         List<Item> accepted=new ArrayList<>();
@@ -1742,7 +1842,8 @@ public final class MainActivity extends Activity {
         String section=order.equals("latest")?"Новинки":order.equals("popular")?"Популярное":"Поиск: "+q;
         status.setText(section+" · "+friendly+
             (category>0?" · "+currentCategoryLabel:""));
-        catalogItems.clear();sitePageCursor=null;loadingNextPage=false;visibleCount=60;
+        catalogItems.clear();sitePageCursor=null;multiWordSession=null;
+        loadingNextPage=false;visibleCount=60;
         main.removeCallbacks(carouselAdvance);
         featuredHost=null;
         featuredItems.clear();
@@ -1755,6 +1856,13 @@ public final class MainActivity extends Activity {
         final String base=prefs.getString("jackett_url","http://192.168.50.2:9117");
 
         NativeSource direct=NativeSources.get(source.equals("all")?"xxxclub":source);
+        if(direct!=null && SearchTerms.needsAndFilter(q)){
+            MultiWordSession session=new MultiWordSession(q,direct,
+                source.equals("all")?0:category,requestId);
+            multiWordSession=session;
+            scanWords(session,true);
+            return;
+        }
         if(direct!=null) {
             worker.execute(()->{
                 SitePages.Cursor cursor=direct.begin(providerQuery,source.equals("all")?0:category);
@@ -1909,7 +2017,9 @@ public final class MainActivity extends Activity {
             compactTvPreview?32:tvLayout?37:60,0,compactTvPreview?2:5));
         if(favoritesMode)addSavedSearchRow();
         TextView line=label("Показано "+Math.min(items.size(),visibleCount)+
-            " · Страниц сайта: "+(sitePageCursor!=null?sitePageCursor.pageIndex:"—"),
+            " · Страниц сайта: "+(multiWordSession!=null?
+                multiWordSession.scanned:
+                sitePageCursor!=null?sitePageCursor.pageIndex:"—"),
             12,MediaDesign.MUTED,false);
         if(!tvLayout)cards.addView(line,spaced(-1,24,0,8));
 
@@ -1928,7 +2038,7 @@ public final class MainActivity extends Activity {
             guidance.setPadding(dp(10),dp(14),dp(10),dp(12));
             cards.addView(guidance,spaced(-1,-2,0,12));
         }
-        if(items.isEmpty() && sitePageCursor==null){
+        if(items.isEmpty() && sitePageCursor==null && multiWordSession==null){
             LinearLayout state=column();
             state.setGravity(Gravity.CENTER);
             state.setPadding(dp(12),dp(33),dp(12),dp(33));
@@ -2086,8 +2196,9 @@ public final class MainActivity extends Activity {
             });
             cards.addView(reveal,spaced(-1,54,0,12));
         }
-        if(sitePageCursor!=null){
-            if(!sitePageCursor.finished){
+        if(sitePageCursor!=null || multiWordSession!=null){
+            if(multiWordSession!=null?multiWordSession.hasMore():
+                !sitePageCursor.finished){
                 Button more=button(loadingNextPage?
                     "Получаем следующую страницу…":
                     "Загрузить следующую страницу  ↓");
@@ -2310,6 +2421,11 @@ public final class MainActivity extends Activity {
         return item.title.toLowerCase(Locale.ROOT)+"|"+item.bytes;
     }
     private void loadNextPage(){
+        if(multiWordSession!=null){
+            if(!multiWordSession.running && multiWordSession.hasMore())
+                scanWords(multiWordSession,false);
+            return;
+        }
         if(loadingNextPage || sitePageCursor==null || sitePageCursor.finished)return;
         loadingNextPage=true;
         int job=serial;
