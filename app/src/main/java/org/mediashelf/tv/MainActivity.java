@@ -1624,13 +1624,13 @@ public final class MainActivity extends Activity {
                 try {
                     SitePages.Page first=direct.fetchNext(cursor,source.equals("all")?0:category);
                     List<Item> results=new ArrayList<>(filterByAndTerms(first.items,q));
-                    // If one seed word yields many pages, keep paging briefly for
-                    // titles containing ALL query words, not only adjacent words.
+                    // Check a second page only when the first has no AND matches;
+                    // otherwise show results immediately without extra network delay.
                     if(SearchTerms.needsAndFilter(q)){
                         Set<String> found=new HashSet<>();
                         for(Item item:results)found.add(catalogKey(item));
-                        for(int attempt=0;attempt<2 && !cursor.finished &&
-                                results.size()<6;attempt++){
+                        for(int attempt=0;attempt<1 && !cursor.finished &&
+                                results.isEmpty();attempt++){
                             SitePages.Page next;
                             try {
                                 next=direct.fetchNext(cursor,source.equals("all")?0:category);
@@ -1782,6 +1782,13 @@ public final class MainActivity extends Activity {
             note.setPadding(dp(13),dp(8),dp(13),dp(8));
             note.setBackground(MediaDesign.round(this,0xff172238,10));
             cards.addView(note,spaced(-1,-2,0,18));
+        }
+        if(items.isEmpty() && sitePageCursor!=null &&
+            SearchTerms.needsAndFilter(lastQuery)){
+            TextView guidance=label("Пока нет названий с каждым из введённых слов. "+
+                "Можно загрузить следующую страницу поиска.",13,MediaDesign.MUTED,false);
+            guidance.setPadding(dp(10),dp(14),dp(10),dp(12));
+            cards.addView(guidance,spaced(-1,-2,0,12));
         }
         if(items.isEmpty() && sitePageCursor==null){
             LinearLayout state=column();
