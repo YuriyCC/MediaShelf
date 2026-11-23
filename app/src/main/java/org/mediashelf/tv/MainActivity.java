@@ -3019,6 +3019,8 @@ public final class MainActivity extends Activity {
         final TextView stage,speed,peers;
         final ProgressBar progress;
         final AtomicBoolean active=new AtomicBoolean(true);
+        volatile Runnable cancelAction;
+        volatile HttpURLConnection preloadConnection;
         PlaybackProgress(AlertDialog d,TextView stage,TextView speed,
                          TextView peers,ProgressBar progress){
             this.dialog=d;this.stage=stage;this.speed=speed;
@@ -3033,6 +3035,16 @@ public final class MainActivity extends Activity {
         }
         void close(){
             active.set(false);
+            dialog.dismiss();
+        }
+        void cancel(){
+            if(!active.getAndSet(false))return;
+            // Unlike close(), cancel() always terminates the outstanding
+            // TorrServer operation, not just the visible progress dialog.
+            HttpURLConnection conn=preloadConnection;
+            if(conn!=null)conn.disconnect();
+            Runnable action=cancelAction;
+            if(action!=null)action.run();
             dialog.dismiss();
         }
     }
@@ -3070,8 +3082,9 @@ public final class MainActivity extends Activity {
             .setView(body).setNegativeButton("Отмена",null).create();
         PlaybackProgress state=new PlaybackProgress(dialog,stage,speed,peers,progress);
         dialog.setOnShowListener(d->{
-            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v->state.close());
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v->state.cancel());
         });
+        dialog.setOnCancelListener(d->state.cancel());
         dialog.show();
         return state;
     }
@@ -3144,16 +3157,27 @@ public final class MainActivity extends Activity {
         // individual streaming URLs. Display the real reported target.
         state.peers.setText("Объём буфера задаётся в TorrServer. "+
             "Скорость и процент обновляются автоматически.");
+        state.cancelAction=()->worker.execute(()->{
+            try{Torr.drop(server,opened.hash);}
+            catch(Exception ignored){}
+        });
         state.dialog.setButton(AlertDialog.BUTTON_NEUTRAL,"Смотреть сейчас",
             (d,w)->{
-                if(state.active.getAndSet(false))launch(stream);
+                if(state.active.getAndSet(false)){
+                    // Hand playback over to the player; a queued preload
+                    // callback must never launch the same stream again.
+                    launch(stream);
+                }
             });
         AtomicBoolean finished=new AtomicBoolean(false);
         final String[] failed={""};
         worker.execute(()->{
-            try{Torr.triggerPreload(stream);}
-            catch(Exception e){failed[0]=error(e);}
-            finally{finished.set(true);}
+            try{
+                if(state.active.get())
+                    Torr.triggerPreload(stream,state);
+            }catch(Exception e){
+                if(state.active.get())failed[0]=error(e);
+            }finally{finished.set(true);}
         });
         worker.execute(()->{
             final long start=android.os.SystemClock.elapsedRealtime();
@@ -3228,6 +3252,10 @@ public final class MainActivity extends Activity {
     private void startVideoDownload(DownloadSelection video,android.net.Uri destination){
         PlaybackProgress state=progressWindow("Скачиваем фильм на выбранный накопитель…");
         activeDownload=state.active;
+        state.cancelAction=()->{
+            HttpURLConnection connection=activeDownloadConnection;
+            if(connection!=null)connection.disconnect();
+        };
         getWindow().addFlags(
             android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         worker.execute(()->{
@@ -3561,11 +3589,17 @@ public final class MainActivity extends Activity {
         static JSONObject status(String base,String hash) throws Exception {
             return post(base,new JSONObject().put("action","get").put("hash",hash));
         }
-        static void triggerPreload(String stream) throws Exception {
+        static void drop(String base,String hash) throws Exception {
+            if(hash==null || !hash.matches("[0-9a-fA-F]{40}"))return;
+            post(base,new JSONObject().put("action","drop").put("hash",hash));
+        }
+        static void triggerPreload(String stream,PlaybackProgress state) throws Exception {
             // Server-side preload uses its configured cache size and target.
             String link=stream.replace("&play","&preload&stat");
             HttpURLConnection c=(HttpURLConnection)new URL(link).openConnection();
+            state.preloadConnection=c;
             try{
+                if(!state.active.get())return;
                 c.setConnectTimeout(10000);
                 c.setReadTimeout(180000);
                 c.setRequestProperty("User-Agent",SiteDetails.USER_AGENT);
@@ -3574,7 +3608,10 @@ public final class MainActivity extends Activity {
                 try(InputStream input=c.getInputStream()){
                     read(input);
                 }
-            }finally{c.disconnect();}
+            }finally{
+                state.preloadConnection=null;
+                c.disconnect();
+            }
         }
         static Opened open(String base,Item item) throws Exception {
             if(!base.startsWith("http"))throw new IllegalArgumentException("Неверный адрес TorrServer");
