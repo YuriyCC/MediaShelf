@@ -74,6 +74,7 @@ public final class MainActivity extends Activity {
     private LinearLayout sidebarNavigation;
     private Button navHomeButton,navPopularButton,navSourceButton,navFavoritesButton;
     private ImageView popularFlameView;
+    private Button firstSavedSearchButton;
     private Button navSectionsButton,navActiveCategoryButton;
     private boolean sidebarSectionsExpanded=false;
     private String sidebarFetchedSource="";
@@ -772,13 +773,17 @@ public final class MainActivity extends Activity {
             b.animate().cancel();
             b.setScaleX(1f);
             b.setScaleY(1f);
-            b.setElevation(f?dp(4):0);
+            // Elevated native buttons cover an ImageView sibling on some TV
+            // renderers. Never raise the popular button above its flame.
+            b.setElevation(flameEntry?0:(f?dp(4):0));
         });
         b.setOnKeyListener((v,key,event)->{
             if(event.getAction()!=android.view.KeyEvent.ACTION_DOWN)
                 return false;
             if(key==android.view.KeyEvent.KEYCODE_DPAD_RIGHT){
-                View target=featuredHost!=null && featuredHost.getParent()!=null?
+                View target=favoritesMode && firstSavedSearchButton!=null?
+                    firstSavedSearchButton:
+                    featuredHost!=null && featuredHost.getParent()!=null?
                     featuredHost:firstCatalogTile;
                 if(target!=null){target.requestFocus();return true;}
             }
@@ -802,10 +807,19 @@ public final class MainActivity extends Activity {
             flame.setFocusable(false);
             flame.setClickable(false);
             android.widget.FrameLayout.LayoutParams iconParams=
-                new android.widget.FrameLayout.LayoutParams(dp(23),dp(23),
+                new android.widget.FrameLayout.LayoutParams(dp(18),dp(18),
                     sidebarCollapsed?Gravity.CENTER:Gravity.LEFT|Gravity.CENTER_VERTICAL);
-            if(!sidebarCollapsed)iconParams.leftMargin=dp(compactTvPreview?8:12);
+            if(!sidebarCollapsed)iconParams.leftMargin=dp(compactTvPreview?9:13);
             host.addView(flame,iconParams);
+            // Important: child Z order, not just source order. The previous
+            // version raised the focused Button and hid this drawable until
+            // focus moved to another sidebar item.
+            b.setElevation(0f);
+            b.setTranslationZ(0f);
+            flame.setElevation(dp(8));
+            flame.setTranslationZ(dp(8));
+            flame.bringToFront();
+            host.setLayerType(View.LAYER_TYPE_SOFTWARE,null);
             popularFlameView=flame;
             sidebarNavigation.addView(host,spaced(-1,
                 compactTvPreview?34:42,0,compactTvPreview?3:5));
@@ -1671,11 +1685,29 @@ public final class MainActivity extends Activity {
             final int pos=i;
             SavedSearches.Entry entry=searches.get(i);
             Button chip=button("⌕  "+entry.query);
+            chip.setFocusable(true);
+            chip.setId(View.generateViewId());
+            if(firstSavedSearchButton==null)firstSavedSearchButton=chip;
             chip.setTextSize(tvLayout?13:12);
             chip.setMaxWidth(dp(tvLayout?235:160));
             chip.setSingleLine(true);
             chip.setEllipsize(TextUtils.TruncateAt.END);
             chip.setBackground(MediaDesign.outlined(this,0xff27203f,0xff684191,12,1));
+            chip.setOnFocusChangeListener((v,focused)->{
+                chip.setBackground(MediaDesign.outlined(this,
+                    focused?0xff493172:0xff27203f,
+                    focused?MediaDesign.ACCENT_LIGHT:0xff684191,12,
+                    focused?2:1));
+            });
+            chip.setOnKeyListener((v,key,event)->{
+                if(event.getAction()==android.view.KeyEvent.ACTION_DOWN &&
+                    key==android.view.KeyEvent.KEYCODE_DPAD_DOWN &&
+                    firstCatalogTile!=null){
+                    firstCatalogTile.requestFocus();
+                    return true;
+                }
+                return false;
+            });
             chip.setOnClickListener(v->{
                 activeSource=entry.source;
                 prefs.edit().putString("indexer",activeSource).apply();
@@ -2107,6 +2139,7 @@ public final class MainActivity extends Activity {
         resetCatalogScroll=false;
         main.removeCallbacks(carouselAdvance);
         cards.removeAllViews();
+        firstSavedSearchButton=null;
         featuredHost=null;
 
         if(!favoritesMode && !items.isEmpty() && isHomepage())
@@ -2204,6 +2237,8 @@ public final class MainActivity extends Activity {
             tile.setClickable(true);tile.setFocusable(true);
             tile.setId(View.generateViewId());
             if(i>=columns)tile.setNextFocusUpId(tileIds.get(i-columns));
+            else if(favoritesMode && firstSavedSearchButton!=null)
+                tile.setNextFocusUpId(firstSavedSearchButton.getId());
             else if(featuredHost!=null)tile.setNextFocusUpId(featuredHost.getId());
             else if(!filterButtons.isEmpty())
                 tile.setNextFocusUpId(filterButtons.get(0).getId());
@@ -2280,7 +2315,9 @@ public final class MainActivity extends Activity {
                 if(event.getAction()!=android.view.KeyEvent.ACTION_DOWN)
                     return false;
                 if(key==android.view.KeyEvent.KEYCODE_DPAD_UP && tileRow==0){
-                    if(featuredHost!=null && featuredHost.getParent()!=null)
+                    if(favoritesMode && firstSavedSearchButton!=null)
+                        firstSavedSearchButton.requestFocus();
+                    else if(featuredHost!=null && featuredHost.getParent()!=null)
                         featuredHost.requestFocus();
                     else focusCurrentCategory();
                     return true;
