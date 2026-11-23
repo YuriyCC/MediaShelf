@@ -124,36 +124,90 @@ final class SiteDetails {
     private static boolean validImageUrl(String value) {
         return value!=null && (value.startsWith("https://")||value.startsWith("http://"));
     }
-    private static String imageSrc(Element picture) {
-        // Prefer the full-resolution asset when a site displays a thumbnail in src.
-        Element anchor=picture.closest("a[href]");
-        if(anchor!=null){
-            String href=anchor.attr("abs:href");
-            if(validImageUrl(href) && href.matches("(?i).*\\.(?:jpg|jpeg|png|webp|avif)(?:[?#].*)?$"))
-                return href;
-        }
-        for(String key:new String[]{"abs:data-full","abs:data-original","abs:data-zoom",
-                "abs:data-src","abs:data-lazy-src","abs:data-echo"}) {
-            String url=picture.attr(key);
-            if(validImageUrl(url))return url;
-        }
-        String srcset=picture.attr("srcset");
-        if(!srcset.isEmpty()){
-            String[] options=srcset.split(",");
-            for(int i=options.length-1;i>=0;i--){
-                String[] parts=options[i].trim().split("\\s+");
-                if(parts.length>0){
-                    String url=parts[0];
-                    if(!validImageUrl(url)){
-                        try{url=new URL(new URL(picture.baseUri()),url).toString();}
-                        catch(Exception ignored){continue;}
-                    }
-                    if(validImageUrl(url))return url;
-                }
+    // Prefer the original linked image, not the image embedded as a thumbnail.
+    // Many release pages wrap 200px previews in <a href=".../full.jpg">.
+    static String imageSrc(Element image) {
+        if(image==null)return "";
+        ImageCandidate best=null;
+        Element link=image.closest("a[href]");
+        if(link!=null){
+            String href=link.attr("abs:href");
+            if(isDirectImage(href))
+                best=pickImage(best,image,href,1050);
+            for(String key:new String[]{"data-full","data-original","data-image"}){
+                String value=link.attr(key);
+                if(!value.isEmpty())
+                    best=pickImage(best,link,value,920);
             }
         }
-        String src=picture.attr("abs:src");
-        return validImageUrl(src)?src:"";
+        String[] attrs={"data-full","data-full-src","data-large","data-zoom",
+            "data-zoom-url","data-original","data-src","data-lazy-src",
+            "data-echo","src"};
+        int[] weights={1000,980,970,960,950,900,520,510,505,340};
+        for(int i=0;i<attrs.length;i++)
+            best=pickImage(best,image,image.attr(attrs[i]),weights[i]);
+
+        best=pickSrcset(best,image,image.attr("srcset"));
+        Element picture=image.closest("picture");
+        if(picture!=null)
+            for(Element source:picture.select("source[srcset]"))
+                best=pickSrcset(best,source,source.attr("srcset"));
+        return best==null?"":best.url;
+    }
+    private static final class ImageCandidate {
+        final String url;
+        final int score;
+        ImageCandidate(String url,int score){this.url=url;this.score=score;}
+    }
+    private static boolean isDirectImage(String url){
+        if(!validImageUrl(url))return false;
+        try{
+            String path=new URI(url).getPath();
+            return path!=null && path.matches("(?i).*\\.(jpg|jpeg|png|webp|avif|gif)$");
+        }catch(Exception ignored){return false;}
+    }
+    private static String imageUrl(Element element,String raw) {
+        if(raw==null || raw.trim().isEmpty())return "";
+        String text=raw.trim();
+        if(validImageUrl(text))return text;
+        if(text.startsWith("data:") || text.startsWith("blob:"))return "";
+        try {
+            String full=new URL(new URL(element.baseUri()),text).toString();
+            return validImageUrl(full)?full:"";
+        }catch(Exception ignored){return "";}
+    }
+    private static ImageCandidate pickImage(ImageCandidate best,Element element,
+                                            String value,int score){
+        String url=imageUrl(element,value);
+        if(url.isEmpty())return best;
+        String lower=url.toLowerCase(Locale.ROOT);
+        if(lower.matches(".*(?:[/_-]thumbs?[/_.-]|[/_-]tiny[/_.-]|[/_-]small[/_.-]).*"))
+            score-=480;
+        else if(lower.matches(".*(?:[/_-]preview[/_.-]|[/_-]resize[/_.-]).*"))
+            score-=200;
+        if(lower.matches(".*(?:[/_-]full[/_.-]|[/_-]original[/_.-]|[/_-]large[/_.-]).*"))
+            score+=130;
+        if(best==null || score>best.score)return new ImageCandidate(url,score);
+        return best;
+    }
+    private static ImageCandidate pickSrcset(ImageCandidate best,Element element,String srcset){
+        if(srcset==null || srcset.isEmpty())return best;
+        for(String candidate:srcset.split(",")){
+            String[] terms=candidate.trim().split("\\s+");
+            if(terms.length==0)continue;
+            int score=620;
+            if(terms.length>1){
+                String suffix=terms[terms.length-1].toLowerCase(Locale.ROOT);
+                try{
+                    if(suffix.endsWith("w"))score+=Math.min(420,
+                        Integer.parseInt(suffix.substring(0,suffix.length()-1))/4);
+                    else if(suffix.endsWith("x"))score+=Math.min(420,
+                        (int)(Float.parseFloat(suffix.substring(0,suffix.length()-1))*120));
+                }catch(NumberFormatException ignored){}
+            }
+            best=pickImage(best,element,terms[0],score);
+        }
+        return best;
     }
     static String verifyImage(String link,String referrer) {
         if(!validImageUrl(link))return "нет URL";
