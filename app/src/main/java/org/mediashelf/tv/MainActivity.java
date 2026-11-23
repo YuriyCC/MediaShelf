@@ -62,6 +62,9 @@ public final class MainActivity extends Activity {
     private Button topSearchButton;
     private Button sidebarToggleButton;
     private LinearLayout sidebarPanel;
+    private LinearLayout sidebarNavigation;
+    private Button navHomeButton,navPopularButton,navSourceButton;
+    private TextView currentSectionLabel;
     private boolean sidebarCollapsed;
     private int sidebarWidthDp;
     private Button bannerSettingsButton;
@@ -430,7 +433,7 @@ public final class MainActivity extends Activity {
             (screenWidthDp<960 || screenHeightDp<650);
         tvLayout=hardwareTv || tvPreviewMode ||
             (screenWidthDp>=840 && screenHeightDp>=550);
-        sidebarCollapsed=tvLayout && prefs.getBoolean("sidebar_hidden",false);
+        sidebarCollapsed=tvLayout && prefs.getBoolean("sidebar_hidden",true);
         sidebarWidthDp=compactTvPreview?
             Math.max(120,Math.min(146,screenWidthDp/5)):176;
         sidebarPanel=null;
@@ -454,84 +457,17 @@ public final class MainActivity extends Activity {
         if(tvLayout){
             LinearLayout sidebar=column();
             sidebarPanel=sidebar;
-            sidebar.setPadding(dp(compactTvPreview?7:9),
-                dp(compactTvPreview?8:13),dp(compactTvPreview?7:9),
-                dp(compactTvPreview?7:10));
+            sidebarNavigation=column();
             sidebar.setBackground(MediaDesign.horizontal(this,
-                new int[]{0xff12182b,0xff0d1425},0));
-            LinearLayout brandRow=line();
-            TextView brandLogo=label("▶",compactTvPreview?17:20,Color.WHITE,true);
-            brandLogo.setGravity(Gravity.CENTER);
-            brandLogo.setBackground(MediaDesign.gradient(this,
-                new int[]{0xffae4df1,0xff5723d2},15));
-            brandRow.addView(brandLogo,spaced(
-                compactTvPreview?30:36,compactTvPreview?30:36,
-                compactTvPreview?6:8,0));
-            LinearLayout brandText=column();
-            brandText.addView(label("MediaShelf",
-                compactTvPreview?14:18,MediaDesign.TEXT,true));
-            // Keep the brand in a single compact line, without a subtitle.
-            brandRow.addView(brandText);
-            sidebar.addView(brandRow,spaced(-1,
-                compactTvPreview?35:42,0,compactTvPreview?8:15));
-            TextView section=eyebrow("НАВИГАЦИЯ");
-            section.setPadding(dp(compactTvPreview?5:11),0,0,
-                dp(compactTvPreview?4:11));
-            sidebar.addView(section);
-            Button home=button("▦   Весь каталог");
-            home.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
-            home.setPadding(dp(compactTvPreview?8:16),0,dp(4),0);
-            home.setOnClickListener(v->selectSource("all"));
-            home.setTextSize(compactTvPreview?11:14);
-            sidebar.addView(home,spaced(-1,
-                compactTvPreview?34:39,0,compactTvPreview?5:10));
-            sourceSummary=eyebrow("ИСТОЧНИКИ");
-            sourceSummary.setPadding(dp(compactTvPreview?5:11),0,0,
-                dp(compactTvPreview?4:11));
-            sidebar.addView(sourceSummary);
-            ScrollView sourceScroll=new ScrollView(this);
-            sourceScroll.setVerticalScrollBarEnabled(false);
-            sourceScroll.setFillViewport(false);
-            sourceButtons=column();
-            sourceScroll.addView(sourceButtons);
-            sidebar.addView(sourceScroll,new LinearLayout.LayoutParams(-1,0,1));
-            View divider=new View(this);
-            divider.setBackgroundColor(0xff2c3852);
-            sidebar.addView(divider,spaced(-1,1,0,compactTvPreview?5:14));
-            if(tvPreviewMode){
-                Button exit=accentButton("⇄  Режим телефона");
-                exit.setTextSize(compactTvPreview?11:13);
-                exit.setOnClickListener(v->toggleTvPreview());
-                sidebar.addView(exit,spaced(-1,
-                    compactTvPreview?38:47,0,compactTvPreview?5:9));
-            }
-            Button check=button("◈  Проверка сайтов");
-            check.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
-            check.setPadding(dp(compactTvPreview?6:14),0,0,0);
-            check.setTextSize(compactTvPreview?11:12);
-            check.setOnClickListener(v->diagnostics());
-            sidebar.addView(check,spaced(-1,
-                compactTvPreview?35:39,0,compactTvPreview?3:5));
-            Button banner=button("✦  Настройка баннера");
-            banner.setTextSize(compactTvPreview?11:12);
-            banner.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
-            banner.setPadding(dp(compactTvPreview?6:11),0,0,0);
-            banner.setOnClickListener(v->configureBanner());
-            sidebar.addView(banner,spaced(-1,
-                compactTvPreview?35:39,0,compactTvPreview?3:5));
-            Button settings=button("⚙  Настройки");
-            settings.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
-            settings.setPadding(dp(compactTvPreview?6:14),0,0,0);
-            settings.setTextSize(compactTvPreview?11:12);
-            settings.setOnClickListener(v->settings(false));
-            sidebar.addView(settings,lp(-1,compactTvPreview?35:39));
-            if(!compactTvPreview){
-                TextView foot=label("OK — открыть     ◀ — назад",10,0xff7585a4,false);
-                foot.setPadding(dp(10),dp(19),0,0);
-                sidebar.addView(foot);
-            }
-            outer.addView(sidebar,lp(sidebarWidthDp,-1));
-            sidebar.setVisibility(sidebarCollapsed?View.GONE:View.VISIBLE);
+                new int[]{0xff111628,0xff0c1424},0));
+            ScrollView navScroll=new ScrollView(this);
+            navScroll.setVerticalScrollBarEnabled(false);
+            navScroll.setFillViewport(false);
+            navScroll.addView(sidebarNavigation);
+            sidebar.addView(navScroll,new LinearLayout.LayoutParams(-1,0,1));
+            outer.addView(sidebar,lp(sidebarCollapsed?
+                (compactTvPreview?46:54):sidebarWidthDp,-1));
+            renderSidebarNavigation();
         }
         LinearLayout app=column();
         app.setPadding(dp(compactTvPreview?9:tvLayout?18:16),
@@ -539,71 +475,34 @@ public final class MainActivity extends Activity {
             dp(compactTvPreview?9:tvLayout?15:16),0);
         outer.addView(app,new LinearLayout.LayoutParams(0,-1,1));
 
-        LinearLayout header=line();
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        if(tvLayout){
-            sidebarToggleButton=button(sidebarCollapsed?"☰":"❮");
-            sidebarToggleButton.setId(View.generateViewId());
-            sidebarToggleButton.setTextSize(compactTvPreview?19:23);
-            sidebarToggleButton.setContentDescription(sidebarCollapsed?
-                "Показать левое меню":"Скрыть левое меню");
-            sidebarToggleButton.setOnClickListener(v->
-                setSidebarCollapsed(!sidebarCollapsed,true));
-            sidebarToggleButton.setOnKeyListener((v,key,event)->{
-                if(event.getAction()!=android.view.KeyEvent.ACTION_DOWN)return false;
-                if(key==android.view.KeyEvent.KEYCODE_DPAD_DOWN){
-                    focusCurrentCategory();return true;
-                }
-                return false;
-            });
-            header.addView(sidebarToggleButton,spaced(
-                compactTvPreview?35:43,compactTvPreview?34:40,
-                compactTvPreview?4:9,0));
-        }
-        LinearLayout headerTitles=column();
-        TextView mainTitle=label(tvLayout?"MediaShelf":"MediaShelf",
-            tvLayout?(compactTvPreview?16:19):24,MediaDesign.TEXT,true);
-        headerTitles.addView(mainTitle);
+        // Touch phones retain the original search field and a compact header.
+        // Television uses the permanent navigation rail instead.
         if(!tvLayout){
-            TextView sub=eyebrow("ТВОЯ МЕДИАТЕКА  /  18+");
-            sub.setTextSize(10);
-            headerTitles.addView(sub);
-        }
-        header.addView(headerTitles,new LinearLayout.LayoutParams(0,
-            dp(tvLayout?(compactTvPreview?38:48):63),1));
-
-        sourceSelector=button("XXXClub  ▾");
-        sourceSelector.setTextSize(tvLayout?(compactTvPreview?11:12):13);
-        sourceSelector.setOnClickListener(v->chooseSource());
-        if(tvLayout){
-            header.addView(sourceSelector,spaced(
-                compactTvPreview?100:130,compactTvPreview?34:40,6,0));
-            topSearchButton=button("⌕");
-            topSearchButton.setTextSize(compactTvPreview?19:24);
-            topSearchButton.setContentDescription("Поиск по каталогу");
-            topSearchButton.setOnClickListener(v->openSearchDialog());
-            header.addView(topSearchButton,spaced(
-                compactTvPreview?37:44,compactTvPreview?34:40,6,0));
-            bannerSettingsButton=button("✦");
-            bannerSettingsButton.setTextSize(compactTvPreview?17:21);
-            bannerSettingsButton.setContentDescription("Настроить баннер");
-            bannerSettingsButton.setOnClickListener(v->configureBanner());
-            header.addView(bannerSettingsButton,spaced(
-                compactTvPreview?37:44,compactTvPreview?34:40,6,0));
-            Button prefsButton=button("⚙");
-            prefsButton.setTextSize(compactTvPreview?17:21);
-            prefsButton.setContentDescription("Настройки");
-            prefsButton.setOnClickListener(v->settings(false));
-            header.addView(prefsButton,lp(
-                compactTvPreview?37:44,compactTvPreview?34:40));
-        }else{
-            header.addView(sourceSelector,spaced(112,43,6,0));
+            LinearLayout header=line();
+            header.setGravity(Gravity.CENTER_VERTICAL);
+            LinearLayout heading=column();
+            heading.addView(label("MediaShelf",22,MediaDesign.TEXT,true));
+            heading.addView(eyebrow("КАТАЛОГ  /  18+"));
+            header.addView(heading,new LinearLayout.LayoutParams(0,dp(60),1));
+            sourceSelector=button("XXXClub ▾");
+            sourceSelector.setTextSize(12);
+            sourceSelector.setOnClickListener(v->chooseSource());
+            header.addView(sourceSelector,spaced(111,43,6,0));
             Button options=button("⋮");
             options.setOnClickListener(v->moreOptions());
             header.addView(options,lp(43,43));
+            app.addView(header,spaced(-1,65,0,7));
+        }else{
+            currentSectionLabel=label("",compactTvPreview?12:14,
+                MediaDesign.MUTED,false);
+            currentSectionLabel.setGravity(Gravity.CENTER_VERTICAL);
+            currentSectionLabel.setSingleLine(true);
+            currentSectionLabel.setEllipsize(TextUtils.TruncateAt.END);
+            currentSectionLabel.setPadding(dp(5),0,0,0);
+            app.addView(currentSectionLabel,spaced(-1,
+                compactTvPreview?27:35,0,2));
+            updateCurrentSection();
         }
-        app.addView(header,spaced(-1,tvLayout?(compactTvPreview?43:55):68,
-            0,tvLayout?2:7));
 
         status=label("Выбери категорию или найди раздачу",13,MediaDesign.MUTED,false);
         status.setSingleLine(true);status.setEllipsize(TextUtils.TruncateAt.END);
@@ -692,7 +591,7 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams strips=lp(-1,
             compactTvPreview?44:tvLayout?69:60);
         strips.topMargin=dp(6);
-        app.addView(strip,strips);
+        if(!tvLayout)app.addView(strip,strips);
 
         ScrollView results=new ScrollView(this);
         catalogScroll=results;
