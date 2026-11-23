@@ -88,6 +88,38 @@ final class SiteDetails {
                     if(og!=null)picture=og.attr("abs:content");
                 }
                 if(validImageUrl(picture))item.poster=picture;
+                // Search index from this release only, never the site's entire
+                // document (which could include sidebar links and other movies).
+                // Metadata on the main detail page may include studio, category,
+                // genre and tags absent from the release title.
+                StringBuilder searchData=new StringBuilder();
+                Element keyword=d.selectFirst("meta[name=keywords]");
+                if(keyword!=null)searchData.append(keyword.attr("content")).append(' ');
+                Element metaDesc=d.selectFirst("meta[name=description]");
+                if(metaDesc!=null)searchData.append(metaDesc.attr("content")).append(' ');
+                for(Element tag:d.select("meta[property=article:tag]")){
+                    searchData.append(tag.attr("content")).append(' ');
+                }
+                Element detailArea=d.selectFirst(
+                    "div.description, div.torrent_details, div.torrent_info_div, "+
+                    "div.postbody div.content, div.postbody");
+                if(detailArea!=null){
+                    for(Element tag:detailArea.select(
+                        "a[href*=/tag/], a[href*=/tags/], "+
+                        "a[href*=/genre/], a[href*=/genres/], "+
+                        "a[href*=/category/], a.catah, .tag, .genre, .category")){
+                        String text=tag.text().trim();
+                        if(!text.isEmpty() && text.length()<150 &&
+                            searchData.length()<12000)
+                            searchData.append(text).append(' ');
+                    }
+                    // Keep additional source text even if the UI's description
+                    // is shortened to 3,800 characters.
+                    String about=detailArea.text().trim();
+                    if(!about.isEmpty())
+                        searchData.append(about,0,Math.min(about.length(),12000));
+                }
+                item.searchMetadata=searchData.toString();
                 if(description!=null){
                     String val=description.text();
                     if(!val.isEmpty() && (item.description==null||item.description.isEmpty()))
