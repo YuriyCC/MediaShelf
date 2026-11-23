@@ -3335,7 +3335,7 @@ public final class MainActivity extends Activity {
         Button banner=button("Настройки баннера  ›");
         banner.setTextSize(15);
         root.addView(banner,spaced(-1,48,0,15));
-        TextView version=label("MediaShelf 2.3 • Jackett необязателен для сайтов с прямым подключением.",
+        TextView version=label("MediaShelf 2.4 • Jackett необязателен для сайтов с прямым подключением.",
             12,MediaDesign.MUTED,false);
         version.setGravity(Gravity.CENTER);
         root.addView(version,spaced(-1,-2,0,6));
