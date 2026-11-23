@@ -2176,7 +2176,7 @@ public final class MainActivity extends Activity {
                 BitmapFactory.decodeByteArray(bytes,0,bytes.length,bounds);
                 int maxSide=fullResolution?3200:1000;
                 int sample=1;
-                while(Math.max(bounds.outWidth,bounds.outHeight)>maxSide*sample*2)
+                while(Math.max(bounds.outWidth,bounds.outHeight)>maxSide*sample)
                     sample*=2;
                 BitmapFactory.Options decode=new BitmapFactory.Options();
                 decode.inSampleSize=sample;
