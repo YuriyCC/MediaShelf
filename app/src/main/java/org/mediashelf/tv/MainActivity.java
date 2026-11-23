@@ -2637,9 +2637,8 @@ public final class MainActivity extends Activity {
         };
         preview.setOnClickListener(v->showFullPhoto(item,selected[0]));
         preview.setOnFocusChangeListener((v,focused)->{
-            preview.setBackground(focused?
-                MediaDesign.outlined(this,0xff151b33,MediaDesign.ACCENT,12,2):
-                MediaDesign.round(this,0xff09101f,12));
+            preview.setForeground(focused?
+                MediaDesign.outlined(this,0x00000000,MediaDesign.ACCENT_LIGHT,12,2):null);
         });
         android.widget.HorizontalScrollView strip=new android.widget.HorizontalScrollView(this);
         strip.setHorizontalScrollBarEnabled(false);
@@ -2662,9 +2661,9 @@ public final class MainActivity extends Activity {
             thumbs.addView(thumb,spaced(thumbWidth,thumbHeight,6,0));
             loadImage(thumb,url,referer(item),null,false);
             thumb.setOnFocusChangeListener((v,focused)->{
-                thumb.setBackground(focused?
-                    MediaDesign.outlined(this,0xff39235a,MediaDesign.ACCENT,8,2):
-                    MediaDesign.round(this,0xff263149,8));
+                // The focus ring must be drawn OVER the photo, not behind it.
+                thumb.setForeground(focused?
+                    MediaDesign.outlined(this,0x00000000,MediaDesign.ACCENT_LIGHT,8,3):null);
                 if(focused){
                     selected[0]=url;
                     selectedPosition[0]=position;
