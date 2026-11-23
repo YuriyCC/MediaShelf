@@ -3533,21 +3533,45 @@ public final class MainActivity extends Activity {
     /** Saved local files can be played/deleted without a file manager. */
     private void openDownloads(){
         List<File> files=LocalVideoStore.completed(this);
-        if(files.isEmpty()){
+        List<File> incomplete=LocalVideoStore.incomplete(this);
+        if(files.isEmpty() && incomplete.isEmpty()){
             themedDialog().setTitle("Загрузки")
                 .setMessage("Скачанных фильмов пока нет. Открой раздачу, "+
                     "выбери Play → «Скачать полностью».")
                 .setPositiveButton("ОК",null).show();
             return;
         }
-        String[] names=new String[files.size()];
-        for(int i=0;i<names.length;i++)
-            names[i]=files.get(i).getName()+" · "+dataSize(files.get(i).length());
-        showSelectionDialog("Загрузки · "+files.size(),names,(dialog,index)->{
-            if(index<0||index>=files.size())return;
+        String[] names=new String[files.size()+incomplete.size()];
+        for(int i=0;i<files.size();i++)
+            names[i]="▶  "+files.get(i).getName()+
+                " · "+dataSize(files.get(i).length());
+        for(int i=0;i<incomplete.size();i++){
+            File part=incomplete.get(i);
+            names[files.size()+i]="◌  "+part.getName().replaceFirst(
+                "\\.part$","")+" · не завершено · "+dataSize(part.length());
+        }
+        showSelectionDialog("Загрузки · "+names.length,names,(dialog,index)->{
+            if(index<0||index>=names.length)return;
+            if(index>=files.size()){
+                File part=incomplete.get(index-files.size());
+                themedDialog().setTitle("Незавершённая загрузка")
+                    .setMessage(part.getName().replaceFirst("\\.part$","")+
+                        "\nСкачано "+dataSize(part.length())+
+                        ". Чтобы продолжить, снова выбери фильм в каталоге "+
+                        "и нажми «Скачать полностью» на том же накопителе.")
+                    .setPositiveButton("Удалить часть",(d,w)->{
+                        File marker=new File(part.getAbsolutePath()+".info");
+                        boolean deleted=part.delete();
+                        if(deleted)marker.delete();
+                        Toast.makeText(this,deleted?"Часть файла удалена":
+                            "Не удалось удалить",Toast.LENGTH_SHORT).show();
+                        openDownloads();
+                    }).setNegativeButton("Закрыть",null).show();
+                return;
+            }
             File file=files.get(index);
             showSelectionDialog(file.getName(),new String[]{
-                "▶  Смотреть с телевизора","✕  Удалить файл"
+                "▶  Смотреть с устройства","✕  Удалить файл"
             },(dlg,choice)->{
                 if(choice==0)playLocalVideo(file);
                 else if(choice==1)
