@@ -107,10 +107,11 @@ final class SitePages {
                 }
             }
             String poster="";
-            Element image=row.selectFirst("img[src],img[data-src]");
+            Element image=row.selectFirst("img[src],img[data-src],img[data-original]");
             if(image!=null){
-                poster=image.attr("abs:src");
+                poster=image.attr("abs:data-original");
                 if(poster.isEmpty())poster=image.attr("abs:data-src");
+                if(poster.isEmpty())poster=image.attr("abs:src");
             }
             String size=own(row.selectFirst("span.siz"));
             long bytes=toBytes(size);
