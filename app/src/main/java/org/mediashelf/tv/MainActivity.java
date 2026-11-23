@@ -1433,20 +1433,12 @@ public final class MainActivity extends Activity {
             cards.addView(state);
             return;
         }
-        int screen=getResources().getConfiguration().screenWidthDp;
-        int leftSidebar=tvLayout&&!sidebarCollapsed?sidebarWidthDp:0;
-        int layoutPadding=compactTvPreview?25:tvLayout?43:48;
-        int usable=Math.max(238,screen-leftSidebar-layoutPadding);
-        int spacing=compactTvPreview?7:tvLayout?9:10;
-        // Sidebar collapse really adds room for more film posters.
-        // Keep a minimum practical poster width rather than stretching 3-4
-        // cards across the full screen.
-        int target=compactTvPreview?92:tvLayout?119:160;
-        int maxCols=compactTvPreview?8:tvLayout?11:2;
-        int columns=tvLayout?
-            Math.max(3,Math.min(maxCols,usable/target)):2;
-        int cardWidth=Math.max(compactTvPreview?58:tvLayout?86:126,
-            (usable-columns*spacing-8)/columns);
+        PosterGrid.Size geometry=PosterGrid.calculate(
+            getResources().getConfiguration().screenWidthDp,
+            sidebarWidthDp,sidebarCollapsed,compactTvPreview,tvLayout);
+        int spacing=geometry.spacingDp;
+        int columns=geometry.columns;
+        int cardWidth=geometry.cardDp;
         int coverHeight=(int)(cardWidth*
             (compactTvPreview?1.05f:tvLayout?1.29f:1.12f));
         GridLayout grid=new GridLayout(this);
