@@ -33,4 +33,24 @@ public final class SearchTermsTest {
         assertTrue(SearchTerms.matchesTitle("Unrelated title","Dorcel"));
         assertTrue(SearchTerms.matchesTitle("Unrelated title",""));
     }
+    @Test public void twoWordsCanBeSplitAcrossTitleDescriptionAndTags(){
+        assertTrue(SearchTerms.matchesContent("Blacked 2026 release",
+            "A group scene, Gangbang.",null,"Blacked Gangbang"));
+        assertTrue(SearchTerms.matchesContent("Exclusive new movie",
+            "Blacked premium studio","Tags: Gangbang HD","blacked gangbang"));
+        assertTrue(SearchTerms.matchesContent("Gangbang film",
+            null,"Studio: Blacked","blacked gangbang"));
+    }
+    @Test public void onlyOneWordAcrossAllFieldsDoesNotMatch(){
+        assertFalse(SearchTerms.matchesContent("Blacked new movie",
+            "Romantic scene","Studio Blacked","Blacked Gangbang"));
+        assertFalse(SearchTerms.matchesContent("Gangbang scene",
+            "",null,"Blacked Gangbang"));
+    }
+    @Test public void preserveWholeWordMatchingAcrossFields(){
+        assertFalse(SearchTerms.matchesContent("Blacked scene",
+            "Gangbanging only",null,"blacked gangbang"));
+        assertTrue(SearchTerms.matchesContent("Scene",
+            "GANGBANG","blacked","blacked gangbang"));
+    }
 }
