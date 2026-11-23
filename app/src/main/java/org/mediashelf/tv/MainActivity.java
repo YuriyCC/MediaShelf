@@ -1563,6 +1563,13 @@ public final class MainActivity extends Activity {
         }catch(org.json.JSONException ignored){}
         return record;
     }
+    private static List<Item> filterByAndTerms(List<Item> incoming,String query){
+        if(!SearchTerms.needsAndFilter(query))return incoming;
+        List<Item> accepted=new ArrayList<>();
+        for(Item item:incoming)
+            if(SearchTerms.matchesTitle(item.title,query))accepted.add(item);
+        return accepted;
+    }
     private void load(String q,String order) {
         boolean wasFavorites=favoritesMode;
         favoritesMode=false;
@@ -1588,6 +1595,7 @@ public final class MainActivity extends Activity {
                 MediaDesign.ACCENT_LIGHT:MediaDesign.TEXT);
         }
         final String source=activeSource;
+        final String providerQuery=SearchTerms.upstreamQuery(q);
         final int category=currentCategory;
         final int requestId=++serial;
         if(catalogScroll!=null)catalogScroll.scrollTo(0,0);
@@ -1612,10 +1620,27 @@ public final class MainActivity extends Activity {
         NativeSource direct=NativeSources.get(source.equals("all")?"xxxclub":source);
         if(direct!=null) {
             worker.execute(()->{
-                SitePages.Cursor cursor=direct.begin(q,source.equals("all")?0:category);
+                SitePages.Cursor cursor=direct.begin(providerQuery,source.equals("all")?0:category);
                 try {
                     SitePages.Page first=direct.fetchNext(cursor,source.equals("all")?0:category);
-                    List<Item> results=new ArrayList<>(first.items);
+                    List<Item> results=new ArrayList<>(filterByAndTerms(first.items,q));
+                    // If one seed word yields many pages, keep paging briefly for
+                    // titles containing ALL query words, not only adjacent words.
+                    if(SearchTerms.needsAndFilter(q)){
+                        Set<String> found=new HashSet<>();
+                        for(Item item:results)found.add(catalogKey(item));
+                        for(int attempt=0;attempt<2 && !cursor.finished &&
+                                results.size()<6;attempt++){
+                            SitePages.Page next;
+                            try {
+                                next=direct.fetchNext(cursor,source.equals("all")?0:category);
+                            }catch(Exception secondaryError){
+                                break; // Keep results from previously loaded pages.
+                            }
+                            for(Item item:filterByAndTerms(next.items,q))
+                                if(found.add(catalogKey(item)))results.add(item);
+                        }
+                    }
                     if(order.equals("popular"))
                         results.sort(Comparator.comparingInt((Item item)->item.seeders).reversed());
                     main.post(()->{
@@ -1644,9 +1669,9 @@ public final class MainActivity extends Activity {
                     }
                     // Bridge fallback ONLY when direct parsing fails, not the default.
                     try {
-                        Jackett.SearchReport bridged=Jackett.searchReport(base,api,"xxxclub",q,
+                        Jackett.SearchReport bridged=Jackett.searchReport(base,api,"xxxclub",providerQuery,
                                 source.equals("all")?0:category,25000);
-                        List<Item> results=new ArrayList<>(bridged.items);
+                        List<Item> results=filterByAndTerms(bridged.items,q);
                         main.post(()->{
                             if(isFinishing() || requestId!=serial)return;
                             catalogItems.clear();catalogItems.addAll(results);
@@ -1680,8 +1705,8 @@ public final class MainActivity extends Activity {
         }
         worker.execute(()->{
             try {
-                Jackett.SearchReport report=Jackett.searchReport(base,api,source,q,category,35000);
-                List<Item> results=new ArrayList<>(report.items);
+                Jackett.SearchReport report=Jackett.searchReport(base,api,source,providerQuery,category,35000);
+                List<Item> results=filterByAndTerms(report.items,q);
                 if(order.equals("popular"))
                     results.sort(Comparator.comparingInt((Item x)->x.seeders).reversed());
                 main.post(()->{
@@ -2144,6 +2169,7 @@ public final class MainActivity extends Activity {
         loadingNextPage=true;
         int job=serial;
         final SitePages.Cursor cursor=sitePageCursor;
+        final String fullSearch=lastQuery;
         final int category=currentCategory;
         final Set<String> existing=new HashSet<>();
         for(Item item:catalogItems)existing.add(catalogKey(item));
@@ -2161,7 +2187,8 @@ public final class MainActivity extends Activity {
                     SitePages.Page p=provider.fetchNext(cursor,category);
                     last=p.message;
                     for(Item item:p.items){
-                        if(existing.add(catalogKey(item)))additional.add(item);
+                        if(SearchTerms.matchesTitle(item.title,fullSearch) &&
+                            existing.add(catalogKey(item)))additional.add(item);
                     }
                     if(!additional.isEmpty())break;
                 }
