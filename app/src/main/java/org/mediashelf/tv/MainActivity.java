@@ -220,48 +220,172 @@ public final class MainActivity extends Activity {
         renderCarouselSlide();
         scheduleCarousel();
     }
+    private String bannerPreferenceSuffix(){
+        // At present the only native direct site is XXXClub; "all" resolves
+        // to it. The preference key remains per tracker for future modules.
+        return activeSource.equals("all")?"xxxclub":activeSource;
+    }
+    private String bannerCats(){
+        return prefs.getString("banner_categories_"+bannerPreferenceSuffix(),
+            BannerSettings.DEFAULT_CATEGORIES);
+    }
+    private String bannerTopic(){
+        return prefs.getString("banner_query_"+bannerPreferenceSuffix(),
+            BannerSettings.DEFAULT_QUERY);
+    }
+
+    private void configureBanner(){
+        if(!activeSource.equals("xxxclub")&&!activeSource.equals("all")){
+            new AlertDialog.Builder(this).setTitle("Настройка баннера")
+                .setMessage("Пока настраивается прямой источник XXXClub. "+
+                    "Для других сайтов настройки появятся с их модулями.")
+                .setPositiveButton("Закрыть",null).show();
+            return;
+        }
+        List<Integer> initial=BannerSettings.parse(bannerCats());
+        LinearLayout body=column();
+        body.setPadding(dp(20),dp(12),dp(20),dp(12));
+        TextView intro=label("Выбери разделы, из которых брать новинки. "+
+            "Можно выбрать несколько. «Все разделы» отключает остальные.",
+            13,MediaDesign.MUTED,false);
+        body.addView(intro,spaced(-1,-2,0,11));
+        android.widget.CheckBox[] checked=new android.widget.CheckBox[
+            BannerSettings.CODES.length];
+        final boolean[] updating={false};
+        for(int i=0;i<checked.length;i++){
+            final int index=i;
+            android.widget.CheckBox c=new android.widget.CheckBox(this);
+            c.setText(BannerSettings.NAMES[i]);
+            c.setTextSize(tvLayout?15:14);
+            c.setTextColor(MediaDesign.TEXT);
+            c.setButtonTintList(android.content.res.ColorStateList.valueOf(
+                MediaDesign.ACCENT));
+            c.setChecked(initial.contains(BannerSettings.CODES[i]));
+            c.setPadding(dp(4),0,0,0);
+            c.setFocusable(true);
+            c.setOnCheckedChangeListener((button,value)->{
+                if(updating[0]||!value)return;
+                updating[0]=true;
+                if(index==0){
+                    for(int j=1;j<checked.length;j++)checked[j].setChecked(false);
+                }else checked[0].setChecked(false);
+                updating[0]=false;
+            });
+            checked[i]=c;
+            body.addView(c,lp(-1,tvLayout?40:42));
+        }
+        TextView keywordTitle=label("ТЕМА ДЛЯ БАННЕРА (НЕОБЯЗАТЕЛЬНО)",
+            11,MediaDesign.ACCENT_LIGHT,true);
+        keywordTitle.setPadding(0,dp(14),0,dp(7));
+        body.addView(keywordTitle);
+        EditText query=new EditText(this);
+        query.setSingleLine(true);
+        query.setTextColor(MediaDesign.TEXT);
+        query.setHintTextColor(MediaDesign.MUTED);
+        query.setTextSize(15);
+        query.setHint("Например, Gangbang");
+        query.setText(bannerTopic());
+        query.setSelectAllOnFocus(true);
+        query.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        query.setBackground(MediaDesign.outlined(this,0xff1a263b,
+            0xff483376,12,1));
+        query.setPadding(dp(14),0,dp(12),0);
+        body.addView(query,lp(-1,49));
+        TextView example=label("Пример: «Новинки — все разделы» + Gangbang "+
+            "покажет новые результаты поиска Gangbang. "+
+            "Пустая тема означает обычные новинки выбранных разделов.",
+            12,MediaDesign.MUTED,false);
+        example.setPadding(0,dp(11),0,0);
+        body.addView(example);
+        ScrollView scroll=new ScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.addView(body);
+        new AlertDialog.Builder(this).setTitle("Баннер · XXXClub")
+            .setView(scroll)
+            .setNegativeButton("Отмена",null)
+            .setNeutralButton("Сбросить",(dialog,which)->{
+                prefs.edit().putString(
+                    "banner_categories_"+bannerPreferenceSuffix(),"0")
+                    .putString("banner_query_"+bannerPreferenceSuffix(),"")
+                    .apply();
+                refreshBannerFromPreferences();
+            })
+            .setPositiveButton("Сохранить",(dialog,which)->{
+                boolean[] selected=new boolean[checked.length];
+                for(int i=0;i<checked.length;i++)
+                    selected[i]=checked[i].isChecked();
+                String categories=BannerSettings.serialize(selected);
+                String topic=BannerSettings.normalizeQuery(
+                    query.getText().toString());
+                prefs.edit().putString(
+                    "banner_categories_"+bannerPreferenceSuffix(),categories)
+                    .putString("banner_query_"+bannerPreferenceSuffix(),topic)
+                    .apply();
+                refreshBannerFromPreferences();
+            }).show();
+    }
+    private void refreshBannerFromPreferences(){
+        if(!isHomepage())return;
+        featuredItems.clear();
+        featuredIndex=0;
+        featuredLoading=true;
+        renderCarouselSlide();
+        fetchFeaturedFilms(serial);
+    }
     private void fetchFeaturedFilms(int requestId){
         if(!isHomepage())return;
+        final List<Integer> categories=BannerSettings.parse(bannerCats());
+        final String topic=BannerSettings.normalizeQuery(bannerTopic());
+        final boolean includeCollections=categories.contains(6050) ||
+            categories.contains(6060)||categories.contains(6070);
         worker.execute(()->{
-            List<Item> accepted=new ArrayList<>();
+            List<Item> picked=new ArrayList<>();
             try{
-                // Native category 3 = single full-length movies / DVD / WEB.
-                // This is a separate query; "MegaPACK" and other site packs
-                // from the general latest feed will not become feature items.
-                SitePages.Cursor cursor=SitePages.start("",6090);
-                List<Item> found=new ArrayList<>();
-                for(int page=0;page<3 && !cursor.finished;page++){
-                    SitePages.Page one=SitePages.next(cursor,6090);
-                    found.addAll(one.items);
-                    if(selectFeaturedFilms(found).size()>=4)break;
+                List<List<Item>> groups=new ArrayList<>();
+                for(int cat:categories){
+                    SitePages.Cursor cursor=SitePages.start(topic,cat);
+                    List<Item> entries=new ArrayList<>();
+                    for(int page=0;page<2&&!cursor.finished;page++){
+                        SitePages.Page response=SitePages.next(cursor,cat);
+                        entries.addAll(response.items);
+                        if(selectFeaturedEntries(entries,5,includeCollections)
+                            .size()>=5)break;
+                    }
+                    groups.add(entries);
                 }
-                accepted.addAll(selectFeaturedFilms(found));
+                // Round robin mixes simultaneously selected categories. Each
+                // individual site's original page order is still newest first.
+                List<Item> combined=new ArrayList<>();
+                int max=0;
+                for(List<Item> group:groups)max=Math.max(max,group.size());
+                for(int pos=0;pos<max;pos++)
+                    for(List<Item> group:groups)
+                        if(group.size()>pos)combined.add(group.get(pos));
+                picked.addAll(selectFeaturedEntries(combined,5,
+                    includeCollections));
             }catch(Exception ignored){
-                // Preserve the normal catalog if curation cannot be fetched.
-                // Never replace the results with a random pack.
+                // Main catalog must remain usable if the banner source fails.
             }
             main.post(()->{
                 if(isFinishing() || requestId!=serial || !isHomepage())return;
                 featuredItems.clear();
-                featuredItems.addAll(accepted);
+                featuredItems.addAll(picked);
                 featuredIndex=0;
                 featuredLoading=false;
                 renderCarouselSlide();
             });
         });
     }
-    private static List<Item> selectFeaturedFilms(List<Item> films){
+    private static List<Item> selectFeaturedEntries(
+            List<Item> entries,int limit,boolean includeCollections){
         List<FeaturedSelector.Candidate> scored=new ArrayList<>();
-        for(Item item:films){
-            scored.add(new FeaturedSelector.Candidate(
-                item.title,item.poster,item.details,item.seeders));
-        }
+        for(Item item:entries)scored.add(new FeaturedSelector.Candidate(
+            item.title,item.poster,item.details,item.seeders));
         List<Item> result=new ArrayList<>();
-        for(int index:FeaturedSelector.select(scored,5))
-            result.add(films.get(index));
+        for(int index:FeaturedSelector.selectNewest(scored,limit,
+            includeCollections))result.add(entries.get(index));
         return result;
     }
-
 
     private TextView eyebrow(String value){
         TextView t=label(value,11,MediaDesign.ACCENT_LIGHT,true);
@@ -1419,7 +1543,7 @@ public final class MainActivity extends Activity {
         Item movie=featuredItems.get(featuredIndex);
         featuredTitle.setText(movie.title);
         String quality=MediaDesign.quality(movie.title);
-        featuredEyebrow.setText("ВЫБРАНО ИЗ РАЗДЕЛА «ФИЛЬМЫ»");
+        featuredEyebrow.setText("НОВИНКИ · "+BannerSettings.summary(bannerCats(),bannerTopic()));
         featuredMeta.setText((quality.isEmpty()?"Фильм":quality)+"  ·  "+
             movie.seeders+" раздающих  ·  "+movie.size());
         featuredControls.setVisibility(featuredItems.size()>1?View.VISIBLE:View.GONE);
