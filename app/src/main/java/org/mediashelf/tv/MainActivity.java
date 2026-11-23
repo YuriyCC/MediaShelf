@@ -661,6 +661,16 @@ public final class MainActivity extends Activity {
         catalogScroll=results;
         results.setFillViewport(true);
         results.setVerticalScrollBarEnabled(false);
+        // TV scrolling automatically reveals the following page; no extra
+        // "load next" button or remote OK is needed.
+        results.setOnScrollChangeListener((v,x,y,oldX,oldY)->{
+            if(y<=oldY || y<dp(80) || favoritesMode || loadingNextPage)return;
+            if(cards==null || cards.getHeight()-y-results.getHeight()>dp(510))return;
+            if(visibleCount<catalogItems.size() ||
+                (multiWordSession!=null && multiWordSession.hasMore()) ||
+                (sitePageCursor!=null && !sitePageCursor.finished))
+                loadNextPage();
+        });
         results.setDescendantFocusability(android.view.ViewGroup.FOCUS_AFTER_DESCENDANTS);
         cards=column();
         cards.setPadding(0,dp(5),0,dp(35));
@@ -2077,6 +2087,9 @@ public final class MainActivity extends Activity {
         return m;
     }
     private void show(List<Item> items) {
+        View focusedBefore=getCurrentFocus();
+        Item focusedItem=focusedBefore!=null && focusedBefore.getTag() instanceof Item?
+            (Item)focusedBefore.getTag():null;
         firstCatalogTile=null;
         int oldScroll=resetCatalogScroll?0:
             catalogScroll==null?0:catalogScroll.getScrollY();
@@ -2186,6 +2199,7 @@ public final class MainActivity extends Activity {
                 tile.setNextFocusUpId(filterButtons.get(0).getId());
             tileIds.add(tile.getId());
             if(i==0)firstCatalogTile=tile;
+            tile.setTag(item);
             tile.setContentDescription(item.title+"; "+item.size()+
                 "; сидов "+item.seeders+"; "+item.tracker);
             tile.setOnFocusChangeListener((v,f)->{
@@ -2279,46 +2293,36 @@ public final class MainActivity extends Activity {
             p.rightMargin=dp(spacing);
             p.bottomMargin=dp(compactTvPreview?7:tvLayout?11:12);
             grid.addView(tile,p);
-            if(i==focusItemAfterLoad){
+            if(i==focusItemAfterLoad || (focusedItem!=null &&
+                catalogKey(focusedItem).equals(catalogKey(item)))){
                 focusItemAfterLoad=-1;
-                tile.post(tile::requestFocus);
+                tile.post(()->{
+                    if(tile.isAttachedToWindow())tile.requestFocus();
+                });
             }
         }
-        if(items.size()>limit){
-            int next=Math.min(24,items.size()-limit);
-            Button reveal=accentButton("Показать ещё "+next+"  ↓");
-            reveal.setOnClickListener(v->{
-                focusItemAfterLoad=limit;
-                visibleCount+=24;
-                show(catalogItems);
-            });
-            cards.addView(reveal,spaced(-1,54,0,12));
-        }
         if(sitePageCursor!=null || multiWordSession!=null){
-            if(multiWordSession!=null?multiWordSession.hasMore():
-                !sitePageCursor.finished){
-                Button more=button(loadingNextPage?
-                    "Получаем следующую страницу…":
-                    "Загрузить следующую страницу  ↓");
-                more.setEnabled(!loadingNextPage);
-                more.setTextColor(MediaDesign.ACCENT_LIGHT);
-                more.setBackground(MediaDesign.outlined(this,
-                    0xff202f49,0xff7044a0,14,1));
-                more.setOnFocusChangeListener((v,f)->{
-                    more.setBackground(f?
-                        MediaDesign.outlined(this,0xff482b72,
-                            MediaDesign.ACCENT,14,2):
-                        MediaDesign.outlined(this,0xff202f49,0xff7044a0,14,1));
-                    MediaDesign.animateFocus(more,f);
-                });
-                more.setOnClickListener(v->loadNextPage());
-                cards.addView(more,spaced(-1,57,0,14));
-            }else{
-                TextView end=label("Это последняя обнаруженная страница. "+
-                    "Если на сайте есть ещё, сообщи об этом — проверим навигацию.",
+            boolean more=multiWordSession!=null?
+                multiWordSession.hasMore():!sitePageCursor.finished;
+            if(more){
+                // An empty search has no content to scroll: leave a way
+                // to continue scanning without requiring manual pages.
+                if(items.isEmpty() && multiWordSession!=null &&
+                    !multiWordSession.running){
+                    Button continueSearch=button("Продолжить расширенный поиск");
+                    continueSearch.setOnClickListener(v->loadNextPage());
+                    cards.addView(continueSearch,spaced(-1,49,0,10));
+                }else{
+                    TextView upcoming=label(loadingNextPage?
+                        "Загружаем результаты…":"Прокрути вниз для следующих результатов",
+                        12,MediaDesign.MUTED,false);
+                    upcoming.setGravity(Gravity.CENTER);
+                    cards.addView(upcoming,spaced(-1,42,0,8));
+                }
+            }else if(!items.isEmpty()){
+                TextView end=label("Доступные страницы каталога проверены",
                     12,MediaDesign.MUTED,false);
                 end.setGravity(Gravity.CENTER);
-                end.setPadding(dp(12),dp(10),dp(12),dp(10));
                 cards.addView(end,lp(-1,-2));
             }
         }
@@ -2519,6 +2523,11 @@ public final class MainActivity extends Activity {
         return item.title.toLowerCase(Locale.ROOT)+"|"+item.bytes;
     }
     private void loadNextPage(){
+        if(visibleCount<catalogItems.size()){
+            visibleCount=Math.min(catalogItems.size(),visibleCount+24);
+            show(catalogItems);
+            return;
+        }
         if(multiWordSession!=null){
             if(!multiWordSession.running && multiWordSession.hasMore())
                 scanWords(multiWordSession,false);
@@ -2555,7 +2564,8 @@ public final class MainActivity extends Activity {
                 main.post(()->{
                     if(isFinishing() || job!=serial || sitePageCursor!=cursor)return;
                     loadingNextPage=false;
-                    focusItemAfterLoad=additional.isEmpty()?-1:catalogItems.size();
+                    // Keep focus on the current poster when loading more.
+                    focusItemAfterLoad=-1;
                     catalogItems.addAll(additional);
                     visibleCount=Math.max(visibleCount,
                         Math.min(catalogItems.size(),visibleCount+Math.max(30,additional.size())));
